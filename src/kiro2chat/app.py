@@ -1,6 +1,8 @@
 """kiro2chat - Main application entry point."""
 
+import asyncio
 import logging
+import sys
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -26,7 +28,6 @@ async def lifespan(app: FastAPI):
     cw = CodeWhispererClient()
     init_services(tm, cw)
 
-    # Validate token on startup
     try:
         token = await tm.get_access_token()
         logger.info(f"✅ Token valid, profile: {tm.profile_arn}")
@@ -63,13 +64,93 @@ async def root():
     }
 
 
-def main():
+def run_api():
+    """Run the API server."""
     uvicorn.run(
         "kiro2chat.app:app",
         host=config.host,
         port=config.port,
         log_level=config.log_level,
     )
+
+
+def run_webui():
+    """Run the Gradio Web UI."""
+    from .webui import create_ui
+    demo = create_ui()
+    demo.launch(server_name="0.0.0.0", server_port=7860)
+
+
+def run_bot():
+    """Run the Telegram bot."""
+    from .bot.telegram import run_bot as _run_bot
+    asyncio.run(_run_bot())
+
+
+def run_all():
+    """Run API + WebUI + Bot together."""
+    import threading
+    from .bot.telegram import get_bot_token
+
+    # Start API in a thread
+    api_thread = threading.Thread(
+        target=uvicorn.run,
+        kwargs={
+            "app": "kiro2chat.app:app",
+            "host": config.host,
+            "port": config.port,
+            "log_level": config.log_level,
+        },
+        daemon=True,
+    )
+    api_thread.start()
+    logger.info("🚀 API server starting on port %d", config.port)
+
+    # Start bot in a thread if token is available
+    if get_bot_token():
+        bot_thread = threading.Thread(target=run_bot, daemon=True)
+        bot_thread.start()
+        logger.info("🤖 Telegram bot starting")
+    else:
+        logger.info("⏭️ TG_BOT_TOKEN not set, skipping Telegram bot")
+
+    # Run WebUI in main thread (blocking)
+    logger.info("🌐 Web UI starting on port 7860")
+    run_webui()
+
+
+USAGE = """\
+Usage: kiro2chat [command]
+
+Commands:
+  api     Start the API server (default)
+  webui   Start the Gradio Web UI
+  bot     Start the Telegram bot
+  all     Start API + Web UI + Bot together
+
+Options:
+  -h, --help  Show this help
+"""
+
+
+def main():
+    args = sys.argv[1:]
+    cmd = args[0] if args else "api"
+
+    if cmd in ("-h", "--help", "help"):
+        print(USAGE)
+    elif cmd == "api":
+        run_api()
+    elif cmd == "webui":
+        run_webui()
+    elif cmd == "bot":
+        run_bot()
+    elif cmd == "all":
+        run_all()
+    else:
+        print(f"Unknown command: {cmd}\n")
+        print(USAGE)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

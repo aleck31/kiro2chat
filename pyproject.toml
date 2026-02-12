@@ -5,7 +5,9 @@ description = "Kiro to Chat - OpenAI-compatible API powered by Kiro/CodeWhispere
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "aiogram>=3.25.0",
     "fastapi>=0.129.0",
+    "gradio>=6.5.1",
     "httpx>=0.28.1",
     "python-dotenv>=1.2.1",
     "uvicorn>=0.40.0",
