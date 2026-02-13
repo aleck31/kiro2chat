@@ -3,6 +3,8 @@
 import os
 import json
 import logging
+import re
+from collections import defaultdict
 from typing import Optional
 
 import httpx
@@ -15,11 +17,13 @@ logger = logging.getLogger(__name__)
 
 API_BASE = "http://localhost:8000"
 EDIT_INTERVAL = 15  # edit message every N chunks to avoid rate limits
+MAX_HISTORY = 20  # max messages per user in history
 
 router = Router()
 
-# Per-user model selection
+# Per-user state
 user_models: dict[int, str] = {}
+user_histories: dict[int, list[dict]] = defaultdict(list)
 
 
 def _get_models() -> list[str]:
@@ -31,12 +35,57 @@ def _get_models() -> list[str]:
         return ["claude-sonnet-4-20250514"]
 
 
+def _clean_response(text: str) -> str:
+    """Remove raw tool call XML/markup from response text for display."""
+    # Remove <function_calls>...</function_calls> blocks
+    text = re.sub(r"<function_calls>.*?</function_calls>", "", text, flags=re.DOTALL)
+    # Remove <invoke>...</invoke> blocks
+    text = re.sub(r"<invoke.*?</invoke>", "", text, flags=re.DOTALL)
+    # Remove <invoke>...</invoke> blocks
+    text = re.sub(r"<invoke.*?</invoke>", "", text, flags=re.DOTALL)
+    # Remove <tool_call>...</tool_call> blocks
+    text = re.sub(r"<tool_call>.*?</tool_call>", "", text, flags=re.DOTALL)
+    # Clean up excessive whitespace
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _format_tool_calls(tool_calls: list[dict]) -> str:
+    """Format tool calls into a readable summary."""
+    parts = []
+    for tc in tool_calls:
+        fn = tc.get("function", {})
+        name = fn.get("name", "unknown")
+        args = fn.get("arguments", "{}")
+        try:
+            args_obj = json.loads(args) if isinstance(args, str) else args
+            args_short = ", ".join(f"{k}={v!r}" for k, v in list(args_obj.items())[:3])
+            if len(args_obj) > 3:
+                args_short += ", ..."
+        except Exception:
+            args_short = args[:50] if len(args) > 50 else args
+        parts.append(f"🔧 {name}({args_short})")
+    return "\n".join(parts)
+
+
+def _add_to_history(user_id: int, role: str, content: str, tool_calls: list | None = None):
+    """Add a message to user's conversation history."""
+    msg: dict = {"role": role, "content": content}
+    if tool_calls:
+        msg["tool_calls"] = tool_calls
+    user_histories[user_id].append(msg)
+    # Trim history
+    if len(user_histories[user_id]) > MAX_HISTORY:
+        user_histories[user_id] = user_histories[user_id][-MAX_HISTORY:]
+
+
 @router.message(Command("start"))
 async def cmd_start(message: Message):
     await message.answer(
         "👋 Hi! I'm kiro2chat — send me a message and I'll reply with Claude.\n\n"
         "Commands:\n"
         "/model — switch model\n"
+        "/clear — clear conversation history\n"
         "/help — show this help"
     )
 
@@ -46,11 +95,19 @@ async def cmd_help(message: Message):
     await message.answer(
         "🤖 **kiro2chat Telegram Bot**\n\n"
         "Just send a text message to chat with Claude.\n\n"
-        "/model `<name>` — set model (e.g. `/model claude-sonnet-4`)\n"
+        "/model `<name>` — set model\n"
         "/model — list available models\n"
+        "/clear — clear conversation history\n"
         "/help — show this help",
         parse_mode=ParseMode.MARKDOWN,
     )
+
+
+@router.message(Command("clear"))
+async def cmd_clear(message: Message):
+    user_id = message.from_user.id
+    user_histories[user_id] = []
+    await message.answer("🗑 对话历史已清空")
 
 
 @router.message(Command("model"))
@@ -79,13 +136,23 @@ async def cmd_model(message: Message):
 
 @router.message(F.text)
 async def handle_message(message: Message):
+    user_id = message.from_user.id
     models = _get_models()
-    model = user_models.get(message.from_user.id, models[0] if models else "claude-sonnet-4-20250514")
+    model = user_models.get(user_id, models[0] if models else "claude-sonnet-4-20250514")
 
     reply = await message.answer("⏳ Thinking...")
 
-    messages = [{"role": "user", "content": message.text}]
+    # Add user message to history
+    _add_to_history(user_id, "user", message.text)
+
+    # Build messages from history
+    messages = [
+        {"role": m["role"], "content": m["content"]}
+        for m in user_histories[user_id]
+    ]
+
     full = ""
+    tool_calls_collected: list[dict] = []
     chunk_count = 0
 
     try:
@@ -103,26 +170,67 @@ async def handle_message(message: Message):
                     if data == "[DONE]":
                         break
                     chunk = json.loads(data)
-                    delta = chunk["choices"][0]["delta"].get("content", "")
-                    if delta:
-                        full += delta
+                    choice = chunk["choices"][0]
+                    delta = choice.get("delta", {})
+
+                    # Collect text content
+                    content = delta.get("content", "")
+                    if content:
+                        full += content
                         chunk_count += 1
                         if chunk_count % EDIT_INTERVAL == 0:
-                            try:
-                                await reply.edit_text(full[:4096] or "...")
-                            except Exception:
-                                pass
+                            display = _clean_response(full)
+                            if display:
+                                try:
+                                    await reply.edit_text(display[:4096] or "...")
+                                except Exception:
+                                    pass
 
-        if full:
-            try:
-                await reply.edit_text(full[:4096])
-            except Exception:
-                pass
-        else:
-            await reply.edit_text("(empty response)")
+                    # Collect tool calls
+                    if "tool_calls" in delta:
+                        for tc in delta["tool_calls"]:
+                            idx = tc.get("index", 0)
+                            while len(tool_calls_collected) <= idx:
+                                tool_calls_collected.append({
+                                    "id": "", "type": "function",
+                                    "function": {"name": "", "arguments": ""}
+                                })
+                            if tc.get("id"):
+                                tool_calls_collected[idx]["id"] = tc["id"]
+                            fn = tc.get("function", {})
+                            if fn.get("name"):
+                                tool_calls_collected[idx]["function"]["name"] = fn["name"]
+                            if fn.get("arguments"):
+                                tool_calls_collected[idx]["function"]["arguments"] += fn["arguments"]
+
+        # Build final display
+        display_parts = []
+
+        # Clean text content
+        clean_text = _clean_response(full)
+        if clean_text:
+            display_parts.append(clean_text)
+
+        # Format tool calls
+        if tool_calls_collected:
+            tool_summary = _format_tool_calls(tool_calls_collected)
+            display_parts.append(f"\n{tool_summary}")
+
+        display = "\n".join(display_parts) if display_parts else "(empty response)"
+
+        # Save assistant response to history
+        _add_to_history(user_id, "assistant", full)
+
+        try:
+            await reply.edit_text(display[:4096])
+        except Exception:
+            pass
 
     except Exception as e:
         logger.error(f"Chat error: {e}")
+        # Remove the failed user message from history
+        if user_histories[user_id] and user_histories[user_id][-1]["role"] == "user":
+            user_histories[user_id].pop()
         try:
             await reply.edit_text(f"❌ Error: {e}")
         except Exception:
