@@ -6,6 +6,7 @@ from pathlib import Path
 
 CONFIG_DIR = Path.home() / ".config" / "kiro2chat"
 CONFIG_FILE = CONFIG_DIR / "config.toml"
+MCP_CONFIG_FILE = CONFIG_DIR / "mcp.json"
 
 # Flat key -> TOML section mapping
 _SECTIONS = {
@@ -76,3 +77,21 @@ def save_config_file(flat: dict) -> None:
         lines.append("")
 
     CONFIG_FILE.write_text("\n".join(lines), encoding="utf-8")
+
+
+def load_mcp_config() -> dict:
+    """Load MCP server configuration from mcp.json."""
+    import json
+    if not MCP_CONFIG_FILE.exists():
+        return {"mcpServers": {}}
+    try:
+        return json.loads(MCP_CONFIG_FILE.read_text())
+    except Exception:
+        return {"mcpServers": {}}
+
+
+def save_mcp_config(config: dict) -> None:
+    """Save MCP server configuration to mcp.json."""
+    import json
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    MCP_CONFIG_FILE.write_text(json.dumps(config, indent=2, ensure_ascii=False))

@@ -9,7 +9,10 @@ dependencies = [
     "fastapi>=0.129.0",
     "gradio>=6.5.1",
     "httpx>=0.28.1",
+    "litellm>=1.81.10",
     "python-dotenv>=1.2.1",
+    "strands-agents>=1.26.0",
+    "strands-agents-tools>=0.2.20",
     "tomli-w>=1.0.0",
     "uvicorn>=0.40.0",
 ]

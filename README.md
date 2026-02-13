@@ -104,6 +104,16 @@ default_model = "claude-sonnet-4-20250514"
 
 ## Changelog
 
+### v0.4.0
+- 🤖 Strands Agents 集成
+  - 新增 `agent.py` — Strands Agent + LiteLLM 模型（指向 kiro2chat API）
+  - MCP 工具支持：从 `~/.config/kiro2chat/mcp.json` 加载 MCP servers
+  - 新增 CLI 子命令 `kiro2chat agent` — 终端交互式 Agent 聊天
+  - 新增 API 端点：`/v1/agent/chat`, `/v1/agent/tools`, `/v1/agent/reload`
+  - Web UI 新增「🤖 Agent」页面 — 带 MCP 工具的 Agent 聊天
+  - 设置页面新增 MCP 配置编辑器
+- 📦 新增依赖：strands-agents, strands-agents-tools, litellm
+
 ### v0.3.0
 - 🔧 完整的 tool_calls 支持（兼容 OpenAI function calling / Strands Agents）
   - 流式响应：`toolUse` 事件转换为 OpenAI `tool_calls` delta chunks

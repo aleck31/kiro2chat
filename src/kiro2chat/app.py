@@ -13,6 +13,7 @@ from .config import config
 from .core import TokenManager
 from .core.client import CodeWhispererClient
 from .api.routes import router, init_services
+from .api.agent_routes import router as agent_router, init_agent_routes
 
 # Configure logging
 logging.basicConfig(
@@ -36,8 +37,22 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ Token validation failed: {e}")
         logger.error("Make sure kiro-cli is logged in: kiro-cli login")
 
+    # Initialize Strands Agent
+    mcp_clients = []
+    try:
+        from .agent import create_agent, load_mcp_config
+        mcp_config = load_mcp_config()
+        agent, mcp_clients = create_agent(mcp_config=mcp_config)
+        init_agent_routes(agent, mcp_clients, mcp_config)
+        logger.info("✅ Strands Agent initialized")
+    except Exception as e:
+        logger.warning(f"⚠️ Agent init skipped: {e}")
+
     yield
 
+    # Cleanup
+    from .agent import cleanup_mcp_clients
+    cleanup_mcp_clients(mcp_clients)
     await tm.close()
     await cw.close()
 
@@ -50,6 +65,7 @@ app = FastAPI(
 )
 
 app.include_router(router)
+app.include_router(agent_router)
 
 
 @app.get("/")
@@ -61,6 +77,8 @@ async def root():
         "endpoints": {
             "models": "/v1/models",
             "chat": "/v1/chat/completions",
+            "agent_chat": "/v1/agent/chat",
+            "agent_tools": "/v1/agent/tools",
         },
     }
 
@@ -86,6 +104,12 @@ def run_bot():
     """Run the Telegram bot."""
     from .bot.telegram import run_bot as _run_bot
     asyncio.run(_run_bot())
+
+
+def run_agent():
+    """Run the interactive agent chat."""
+    from .agent import interactive_chat
+    interactive_chat()
 
 
 def run_all():
@@ -127,6 +151,7 @@ Commands:
   api     Start the API server (default)
   webui   Start the Gradio Web UI
   bot     Start the Telegram bot
+  agent   Start interactive agent chat (with MCP tools)
   all     Start API + Web UI + Bot together
 
 Options:
@@ -146,6 +171,8 @@ def main():
         run_webui()
     elif cmd == "bot":
         run_bot()
+    elif cmd == "agent":
+        run_agent()
     elif cmd == "all":
         run_all()
     else:

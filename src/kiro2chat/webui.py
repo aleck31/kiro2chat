@@ -9,7 +9,7 @@ import httpx
 import gradio as gr
 
 from .config import config
-from .config_manager import load_config_file, save_config_file
+from .config_manager import load_config_file, save_config_file, load_mcp_config, save_mcp_config
 from .stats import stats
 
 API_BASE = "http://localhost:8000"
@@ -250,6 +250,29 @@ def create_ui() -> gr.Blocks:
             outputs=[save_status],
         )
 
+        # MCP Config Section
+        gr.Markdown("---\n### 🔧 MCP Servers 配置\n编辑 `~/.config/kiro2chat/mcp.json`")
+
+        def load_mcp_json():
+            cfg = load_mcp_config()
+            return json.dumps(cfg, indent=2, ensure_ascii=False)
+
+        mcp_json = gr.Code(label="mcp.json", value=load_mcp_json(), language="json")
+
+        def save_mcp_json(mcp_text):
+            try:
+                data = json.loads(mcp_text)
+                save_mcp_config(data)
+                return "✅ MCP 配置已保存！使用 Reload 按钮加载。"
+            except json.JSONDecodeError as e:
+                return f"❌ JSON 解析错误: {e}"
+            except Exception as e:
+                return f"❌ 保存失败: {e}"
+
+        mcp_save_btn = gr.Button("💾 保存 MCP 配置", variant="secondary")
+        mcp_status = gr.Markdown("")
+        mcp_save_btn.click(fn=save_mcp_json, inputs=[mcp_json], outputs=[mcp_status])
+
     # ---- Monitoring Page ----
     with demo.route("📊 监控面板", "/monitor"):
         gr.Markdown("# 📊 监控面板")
@@ -277,6 +300,65 @@ def create_ui() -> gr.Blocks:
             fn=refresh_monitoring,
             outputs=[stats_md, sys_info_md, token_md, logs_md],
         )
+
+    # ---- Agent Page ----
+    with demo.route("🤖 Agent", "/agent"):
+        gr.Markdown("# 🤖 Agent Chat\nChat with Claude through Strands Agent (with MCP tools)")
+
+        def get_agent_tools_display():
+            try:
+                resp = httpx.get(f"{API_BASE}/v1/agent/tools", timeout=5)
+                resp.raise_for_status()
+                data = resp.json()
+                servers = data.get("servers", [])
+                if not servers:
+                    return "📭 No MCP servers configured. Add servers in Settings → MCP Config."
+                lines = ["### 🔧 Loaded MCP Servers\n"]
+                for s in servers:
+                    lines.append(f"- **{s['server']}**: `{s['command']} {' '.join(s.get('args', []))}`")
+                return "\n".join(lines)
+            except Exception as e:
+                return f"⚠️ Could not fetch tools: {e}"
+
+        tools_display = gr.Markdown(get_agent_tools_display())
+
+        def agent_chat_fn(message: str, history: list[dict]):
+            try:
+                resp = httpx.post(
+                    f"{API_BASE}/v1/agent/chat",
+                    json={"message": message},
+                    timeout=120,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                content = data.get("content", "")
+                tool_uses = data.get("tool_uses", [])
+
+                reply = content
+                if tool_uses:
+                    tool_info = "\n\n---\n🔧 **Tools used:** " + ", ".join(
+                        t["name"] for t in tool_uses
+                    )
+                    reply += tool_info
+                return reply
+            except Exception as e:
+                return f"❌ Error: {e}"
+
+        gr.ChatInterface(fn=agent_chat_fn)
+
+        reload_btn = gr.Button("🔄 Reload MCP Tools")
+
+        def reload_tools():
+            try:
+                resp = httpx.post(f"{API_BASE}/v1/agent/reload", timeout=30)
+                resp.raise_for_status()
+                data = resp.json()
+                return f"✅ Reloaded: {data.get('tool_count', 0)} tools from {', '.join(data.get('servers', []))}"
+            except Exception as e:
+                return f"❌ Reload failed: {e}"
+
+        reload_status = gr.Markdown("")
+        reload_btn.click(fn=reload_tools, outputs=[reload_status])
 
     return demo
 
