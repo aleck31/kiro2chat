@@ -104,6 +104,15 @@ default_model = "claude-sonnet-4-20250514"
 
 ## Changelog
 
+### v0.3.0
+- 🔧 完整的 tool_calls 支持（兼容 OpenAI function calling / Strands Agents）
+  - 流式响应：`toolUse` 事件转换为 OpenAI `tool_calls` delta chunks
+  - 非流式响应：收集 tool_calls 并返回完整响应
+  - `finish_reason: "tool_calls"` 当有工具调用时
+- 🔄 converter.py：支持 `role="tool"` 消息转换为 CW `toolResults` 格式
+- 🔄 converter.py：支持 assistant `tool_calls` 转换为 CW `toolUses` 历史格式
+- 📦 代码重构：routes.py 提取公共辅助函数，减少重复代码
+
 ### v0.2.0
 - ✨ Gradio 多页面 Web UI (Navbar 导航)
   - 💬 聊天页面 + 模型选择
