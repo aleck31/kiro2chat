@@ -10,7 +10,7 @@ from typing import Optional
 
 import httpx
 from aiogram import Bot, Dispatcher, Router, F
-from aiogram.types import Message
+from aiogram.types import Message, BotCommand
 from aiogram.filters import Command
 from aiogram.enums import ParseMode
 
@@ -267,6 +267,14 @@ async def run_bot():
     bot = Bot(token=token)
     dp = Dispatcher()
     dp.include_router(router)
+
+    # Register bot commands menu
+    await bot.set_my_commands([
+        BotCommand(command="model", description="切换/查看模型"),
+        BotCommand(command="clear", description="清空对话历史"),
+        BotCommand(command="help", description="帮助信息"),
+    ])
+
     logger.info("🤖 Telegram bot starting...")
     await dp.start_polling(bot)
 
