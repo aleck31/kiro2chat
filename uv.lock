@@ -569,7 +569,6 @@ wheels = [
 
 [[package]]
 name = "kiro2chat"
-version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiogram" },

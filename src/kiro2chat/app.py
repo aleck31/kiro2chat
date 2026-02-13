@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 
+from kiro2chat import __version__
 from .config import config
 from .core import TokenManager
 from .core.client import CodeWhispererClient
@@ -44,7 +45,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="kiro2chat",
     description="Kiro to Chat - OpenAI-compatible API powered by Kiro/CodeWhisperer",
-    version="0.2.0",
+    version=__version__,
     lifespan=lifespan,
 )
 
@@ -55,7 +56,7 @@ app.include_router(router)
 async def root():
     return {
         "name": "kiro2chat",
-        "version": "0.2.0",
+        "version": __version__,
         "status": "running",
         "endpoints": {
             "models": "/v1/models",
