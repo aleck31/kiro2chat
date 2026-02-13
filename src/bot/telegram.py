@@ -274,7 +274,7 @@ def get_bot_token() -> Optional[str]:
     return os.environ.get("TG_BOT_TOKEN")
 
 
-async def run_bot():
+async def run_bot(handle_signals: bool = True):
     """Start the Telegram bot (blocks until stopped)."""
     token = get_bot_token()
     if not token:
@@ -293,7 +293,7 @@ async def run_bot():
     ])
 
     logger.info("🤖 Telegram bot starting...")
-    await dp.start_polling(bot)
+    await dp.start_polling(bot, handle_signals=handle_signals)
 
 
 def main():

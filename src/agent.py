@@ -7,10 +7,10 @@ with MCP tool support loaded from ~/.config/kiro2chat/mcp.json.
 import json
 import logging
 from pathlib import Path
-from typing import Any, Generator
-
+from typing import Any
+from mcp.client.stdio import StdioServerParameters, stdio_client
 from strands import Agent
-from strands.models.litellm import LiteLLMModel
+from strands.models.openai import OpenAIModel
 from strands.tools.mcp import MCPClient
 from strands_tools import calculator, file_read, file_write, http_request, shell
 
@@ -66,16 +66,23 @@ def create_mcp_clients(mcp_config: dict[str, Any] | None = None) -> list[MCPClie
     servers = mcp_config.get("mcpServers", {})
 
     for name, server_cfg in servers.items():
+        # Only stdio-based servers are supported; skip http/sse types
+        server_type = server_cfg.get("type", "stdio")
+        if server_type in ("http", "sse"):
+            logger.info(f"⏭️ Skipping MCP server '{name}' (type={server_type}, not supported)")
+            continue
+
         command = server_cfg.get("command", "")
+        if not command:
+            logger.warning(f"⏭️ Skipping MCP server '{name}' (no command specified)")
+            continue
+
         args = server_cfg.get("args", [])
-        env = server_cfg.get("env", {})
+        env = server_cfg.get("env") or None
 
         try:
-            client = MCPClient(
-                command=command,
-                args=args,
-                env=env if env else None,
-            )
+            params = StdioServerParameters(command=command, args=args, env=env)
+            client = MCPClient(lambda params=params: stdio_client(params))
             clients.append(client)
             logger.info(f"✅ MCP server configured: {name} ({command} {' '.join(args)})")
         except Exception as e:
@@ -86,10 +93,10 @@ def create_mcp_clients(mcp_config: dict[str, Any] | None = None) -> list[MCPClie
 
 def create_model(
     api_base: str = "http://localhost:8000/v1",
-    model_id: str = "openai/claude-sonnet-4-20250514",
-) -> LiteLLMModel:
-    """Create a LiteLLM model pointing at kiro2chat's API."""
-    return LiteLLMModel(
+    model_id: str = "claude-sonnet-4-20250514",
+) -> OpenAIModel:
+    """Create an OpenAI-compatible model pointing at kiro2chat's API."""
+    return OpenAIModel(
         model_id=model_id,
         client_args={
             "api_key": "not-needed",
@@ -101,11 +108,11 @@ def create_model(
 def create_agent(
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
     api_base: str = "http://localhost:8000/v1",
-    model_id: str = "openai/claude-sonnet-4-20250514",
+    model_id: str = "claude-sonnet-4-20250514",
     mcp_config: dict[str, Any] | None = None,
     load_tools: bool = True,
 ) -> tuple[Agent, list[MCPClient]]:
-    """Create a Strands Agent with LiteLLM model and MCP tools.
+    """Create a Strands Agent with OpenAI-compatible model and MCP tools.
 
     Returns:
         Tuple of (agent, mcp_clients) — caller must manage MCP client lifecycle.
@@ -120,8 +127,8 @@ def create_agent(
         # Start MCP clients and collect tools
         for client in mcp_clients:
             try:
-                client.__enter__()
-                tools.extend(client.list_tools())
+                client.start()
+                tools.extend(client.list_tools_sync())
             except Exception as e:
                 logger.error(f"❌ Failed to start MCP client: {e}")
 
@@ -139,67 +146,8 @@ def cleanup_mcp_clients(clients: list[MCPClient]) -> None:
     """Cleanup MCP client connections."""
     for client in clients:
         try:
-            client.__exit__(None, None, None)
+            client.stop(None, None, None)
         except Exception as e:
             logger.error(f"Error cleaning up MCP client: {e}")
 
 
-def interactive_chat(
-    system_prompt: str = DEFAULT_SYSTEM_PROMPT,
-    api_base: str = "http://localhost:8000/v1",
-    model_id: str = "openai/claude-sonnet-4-20250514",
-) -> None:
-    """Run an interactive terminal chat session with the agent."""
-    mcp_config = load_mcp_config()
-    servers = mcp_config.get("mcpServers", {})
-
-    print("🤖 kiro2chat Agent — Interactive Mode")
-    print(f"   Model: {model_id}")
-    print(f"   API: {api_base}")
-    print(f"   Built-in tools: {', '.join(t.__name__ if hasattr(t, '__name__') else str(t) for t in BUILTIN_TOOLS)}")
-
-    if servers:
-        print(f"   MCP Servers: {', '.join(servers.keys())}")
-    else:
-        print("   MCP Servers: (none configured)")
-
-    print("   Type 'quit' or 'exit' to stop.\n")
-
-    agent, mcp_clients = create_agent(
-        system_prompt=system_prompt,
-        api_base=api_base,
-        model_id=model_id,
-        mcp_config=mcp_config,
-    )
-
-    try:
-        while True:
-            try:
-                user_input = input("\n👤 You: ").strip()
-            except (EOFError, KeyboardInterrupt):
-                print("\n\n👋 Bye!")
-                break
-
-            if not user_input:
-                continue
-            if user_input.lower() in ("quit", "exit"):
-                print("👋 Bye!")
-                break
-
-            print("\n🤖 Agent: ", end="", flush=True)
-            try:
-                result = agent(user_input)
-                # If streaming didn't print inline, print the result
-                if hasattr(result, "message") and result.message:
-                    content = result.message.get("content", "")
-                    if isinstance(content, list):
-                        for block in content:
-                            if isinstance(block, dict) and block.get("text"):
-                                print(block["text"], end="")
-                    elif isinstance(content, str):
-                        print(content, end="")
-                print()
-            except Exception as e:
-                print(f"\n❌ Error: {e}")
-    finally:
-        cleanup_mcp_clients(mcp_clients)

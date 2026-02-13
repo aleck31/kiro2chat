@@ -2,7 +2,6 @@
 
 import json
 import platform
-import time
 from datetime import datetime, timezone, timedelta
 
 import httpx
@@ -180,24 +179,36 @@ def refresh_monitoring():
 # ---------------------------------------------------------------------------
 
 def _get_tools_display() -> str:
-    """Build markdown display of loaded tools."""
+    """Build markdown display of actually loaded tools from the running API."""
     from ._tool_names import BUILTIN_TOOL_NAMES
-    from .config_manager import load_mcp_config
 
-    lines = ["### 🛠 已加载的工具\n", "**内置工具:**"]
+    lines = ["### 🛠 工具列表\n", "**内置工具:**"]
     for name in BUILTIN_TOOL_NAMES:
         lines.append(f"- `{name}`")
 
-    mcp_cfg = load_mcp_config()
-    servers = mcp_cfg.get("mcpServers", {})
-    if servers:
-        lines.append(f"\n**MCP 服务 ({len(servers)}):**")
-        for name, cfg in servers.items():
-            cmd = cfg.get("command", "?")
-            args = " ".join(cfg.get("args", [])[:2])
-            lines.append(f"- `{name}` — {cmd} {args}")
-    else:
-        lines.append("\n**MCP 服务:** (无)")
+    try:
+        resp = httpx.get(f"{API_BASE}/v1/agent/tools", timeout=5)
+        resp.raise_for_status()
+        data = resp.json()
+        mcp_servers = data.get("mcp", [])
+        total = data.get("total_mcp_tools", 0)
+
+        if mcp_servers:
+            lines.append(f"\n**MCP 工具 ({len(mcp_servers)} servers / {total} tools):**")
+            for s in mcp_servers:
+                name = s["server"]
+                cmd = s.get("command", "?")
+                args = " ".join(s.get("args", [])[:2])
+                tc = s.get("tool_count", 0)
+                status = s.get("status", "")
+                if status == "ok":
+                    lines.append(f"- `{name}` — {cmd} {args} ({tc} tools)")
+                else:
+                    lines.append(f"- `{name}` — {cmd} {args} ⚠️ {status}")
+        else:
+            lines.append("\n**MCP 工具:** (无)")
+    except Exception as e:
+        lines.append(f"\n**MCP 工具:** ⚠️ 无法获取 ({e})")
 
     return "\n".join(lines)
 
@@ -205,11 +216,42 @@ def _get_tools_display() -> str:
 def create_ui() -> gr.Blocks:
     models = get_models()
 
+    # ---- Kiro Chat Home Page ----
     with gr.Blocks(title="kiro2chat") as demo:
-        gr.Navbar()
 
-        gr.Markdown("# 🤖 kiro2chat\nChat with Claude via Kiro/CodeWhisperer")
+        gr.Markdown("# 🤖 kiro2chat\nChat with Kiro (with MCP tools)")
 
+        # Hidden state to bridge model dropdown (rendered below) into ChatInterface
+        model_state = gr.State(value=models[0] if models else "")
+
+        def agent_chat_fn(message: str, history: list[dict], model: str):
+            try:
+                resp = httpx.post(
+                    f"{API_BASE}/v1/agent/chat",
+                    json={"message": message, "model": model},
+                    timeout=120,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                content = data.get("content", "")
+                tool_uses = data.get("tool_uses", [])
+
+                reply = content
+                if tool_uses:
+                    tool_info = "\n\n---\n🔧 **Tools used:** " + ", ".join(
+                        t["name"] for t in tool_uses
+                    )
+                    reply += tool_info
+                return reply
+            except Exception as e:
+                return f"❌ Error: {e}"
+
+        gr.ChatInterface(
+            fn=agent_chat_fn,
+            additional_inputs=[model_state],
+        )
+
+        # --- model selector + tools ---
         with gr.Row():
             model_dd = gr.Dropdown(
                 choices=models,
@@ -218,101 +260,27 @@ def create_ui() -> gr.Blocks:
                 interactive=True,
                 scale=3,
             )
-            tools_btn = gr.Button("🛠 工具列表", scale=1)
+            reload_btn = gr.Button("🔄 Reload MCP Tools", scale=1)
 
-        tools_display = gr.Markdown(visible=False)
-        tools_state = gr.State(value=False)
+        model_dd.change(fn=lambda x: x, inputs=[model_dd], outputs=[model_state])
 
-        def toggle_tools(visible):
-            if not visible:
-                return gr.update(value=_get_tools_display(), visible=True), True
-            else:
-                return gr.update(visible=False), False
+        tools_display = gr.Markdown(_get_tools_display())
+        reload_status = gr.Markdown("")
 
-        tools_btn.click(
-            fn=toggle_tools,
-            inputs=[tools_state],
-            outputs=[tools_display, tools_state],
-        )
-
-        gr.ChatInterface(
-            fn=chat_stream,
-            additional_inputs=[model_dd],
-        )
-
-    # ---- Config Page ----
-    with demo.route("⚙️ 系统配置", "/settings"):
-        gr.Markdown("# ⚙️ 系统配置\n编辑后点击保存，重启服务生效。")
-
-        defaults = load_config_values()
-
-        with gr.Row():
-            with gr.Column():
-                gr.Markdown("### 🌐 服务器")
-                cfg_host = gr.Textbox(label="Host", value=defaults[0])
-                cfg_port = gr.Number(label="Port", value=defaults[1], precision=0)
-                cfg_log_level = gr.Dropdown(
-                    choices=["debug", "info", "warning", "error"],
-                    value=defaults[2],
-                    label="日志级别",
-                )
-
-            with gr.Column():
-                gr.Markdown("### 🔐 认证")
-                cfg_api_key = gr.Textbox(label="API Key", value=defaults[3], type="password")
-
-                gr.Markdown("### 📂 Kiro")
-                cfg_kiro_db = gr.Textbox(label="kiro_db_path", value=defaults[4])
-
-        with gr.Row():
-            with gr.Column():
-                gr.Markdown("### 🤖 Telegram Bot")
-                cfg_tg_token = gr.Textbox(label="tg_bot_token", value=defaults[5], type="password")
-
-            with gr.Column():
-                gr.Markdown("### ☁️ AWS 端点")
-                cfg_idc_url = gr.Textbox(label="idc_refresh_url", value=defaults[6])
-                cfg_cw_url = gr.Textbox(label="codewhisperer_url", value=defaults[7])
-
-        gr.Markdown("### 🧠 模型配置")
-        cfg_default_model = gr.Textbox(label="默认模型", value=defaults[8])
-        cfg_model_map = gr.Code(label="model_map (JSON)", value=defaults[9], language="json")
-
-        save_btn = gr.Button("💾 保存配置", variant="primary")
-        save_status = gr.Markdown("")
-
-        save_btn.click(
-            fn=save_config,
-            inputs=[
-                cfg_host, cfg_port, cfg_log_level, cfg_api_key, cfg_kiro_db,
-                cfg_tg_token, cfg_idc_url, cfg_cw_url,
-                cfg_default_model, cfg_model_map,
-            ],
-            outputs=[save_status],
-        )
-
-        # MCP Config Section
-        gr.Markdown("---\n### 🔧 MCP Servers 配置\n编辑 `~/.config/kiro2chat/mcp.json`")
-
-        def load_mcp_json():
-            cfg = load_mcp_config()
-            return json.dumps(cfg, indent=2, ensure_ascii=False)
-
-        mcp_json = gr.Code(label="mcp.json", value=load_mcp_json(), language="json")
-
-        def save_mcp_json(mcp_text):
+        def reload_tools():
             try:
-                data = json.loads(mcp_text)
-                save_mcp_config(data)
-                return "✅ MCP 配置已保存！使用 Reload 按钮加载。"
-            except json.JSONDecodeError as e:
-                return f"❌ JSON 解析错误: {e}"
+                resp = httpx.post(f"{API_BASE}/v1/agent/reload", timeout=30)
+                resp.raise_for_status()
+                data = resp.json()
+                tc = data.get("tool_count", 0)
+                return (
+                    _get_tools_display(),
+                    f"✅ Reloaded: {tc} tools from {', '.join(data.get('servers', []))}",
+                )
             except Exception as e:
-                return f"❌ 保存失败: {e}"
+                return _get_tools_display(), f"❌ Reload failed: {e}"
 
-        mcp_save_btn = gr.Button("💾 保存 MCP 配置", variant="secondary")
-        mcp_status = gr.Markdown("")
-        mcp_save_btn.click(fn=save_mcp_json, inputs=[mcp_json], outputs=[mcp_status])
+        reload_btn.click(fn=reload_tools, outputs=[tools_display, reload_status])
 
     # ---- Monitoring Page ----
     with demo.route("📊 监控面板", "/monitor"):
@@ -342,64 +310,82 @@ def create_ui() -> gr.Blocks:
             outputs=[stats_md, sys_info_md, token_md, logs_md],
         )
 
-    # ---- Agent Page ----
-    with demo.route("🤖 Agent", "/agent"):
-        gr.Markdown("# 🤖 Agent Chat\nChat with Claude through Strands Agent (with MCP tools)")
+    # ---- Settings Page ----
+    with demo.route("⚙️ 系统配置", "/settings"):
+        gr.Markdown("# ⚙️ 系统配置\n编辑后点击保存，重启服务生效。")
 
-        def get_agent_tools_display():
-            try:
-                resp = httpx.get(f"{API_BASE}/v1/agent/tools", timeout=5)
-                resp.raise_for_status()
-                data = resp.json()
-                servers = data.get("servers", [])
-                if not servers:
-                    return "📭 No MCP servers configured. Add servers in Settings → MCP Config."
-                lines = ["### 🔧 Loaded MCP Servers\n"]
-                for s in servers:
-                    lines.append(f"- **{s['server']}**: `{s['command']} {' '.join(s.get('args', []))}`")
-                return "\n".join(lines)
-            except Exception as e:
-                return f"⚠️ Could not fetch tools: {e}"
+        defaults = load_config_values()
 
-        tools_display = gr.Markdown(get_agent_tools_display())
+        with gr.Tab(id='server', label='Server'):
 
-        def agent_chat_fn(message: str, history: list[dict]):
-            try:
-                resp = httpx.post(
-                    f"{API_BASE}/v1/agent/chat",
-                    json={"message": message},
-                    timeout=120,
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                content = data.get("content", "")
-                tool_uses = data.get("tool_uses", [])
+            gr.Markdown("### 🌐 服务器")
 
-                reply = content
-                if tool_uses:
-                    tool_info = "\n\n---\n🔧 **Tools used:** " + ", ".join(
-                        t["name"] for t in tool_uses
+            with gr.Row():
+                with gr.Column():
+                    cfg_host = gr.Textbox(label="Host", value=defaults[0])
+                    cfg_port = gr.Number(label="Port", value=defaults[1], precision=0)
+                    cfg_log_level = gr.Dropdown(
+                        choices=["debug", "info", "warning", "error"],
+                        value=defaults[2],
+                        label="日志级别",
                     )
-                    reply += tool_info
-                return reply
-            except Exception as e:
-                return f"❌ Error: {e}"
 
-        gr.ChatInterface(fn=agent_chat_fn)
+                with gr.Column():
+                    gr.Markdown("### 🔐 认证")
+                    cfg_api_key = gr.Textbox(label="API Key", value=defaults[3], type="password")
 
-        reload_btn = gr.Button("🔄 Reload MCP Tools")
+                    gr.Markdown("### 📂 Kiro")
+                    cfg_kiro_db = gr.Textbox(label="kiro_db_path", value=defaults[4])
 
-        def reload_tools():
-            try:
-                resp = httpx.post(f"{API_BASE}/v1/agent/reload", timeout=30)
-                resp.raise_for_status()
-                data = resp.json()
-                return f"✅ Reloaded: {data.get('tool_count', 0)} tools from {', '.join(data.get('servers', []))}"
-            except Exception as e:
-                return f"❌ Reload failed: {e}"
+            with gr.Row():
+                gr.Markdown("### ☁️ AWS 端点")
+                cfg_idc_url = gr.Textbox(label="idc_refresh_url", value=defaults[6])
+                cfg_cw_url = gr.Textbox(label="codewhisperer_url", value=defaults[7])
 
-        reload_status = gr.Markdown("")
-        reload_btn.click(fn=reload_tools, outputs=[reload_status])
+            with gr.Row():
+                gr.Markdown("### 🤖 Telegram Bot")
+                cfg_tg_token = gr.Textbox(label="tg_bot_token", value=defaults[5], type="password")
+
+            gr.Markdown("### 🧠 模型配置")
+            cfg_default_model = gr.Textbox(label="默认模型", value=defaults[8])
+            cfg_model_map = gr.Code(label="model_map (JSON)", value=defaults[9], language="json")
+
+            save_btn = gr.Button("💾 保存配置", variant="primary")
+            save_status = gr.Markdown("")
+
+            save_btn.click(
+                fn=save_config,
+                inputs=[
+                    cfg_host, cfg_port, cfg_log_level, cfg_api_key, cfg_kiro_db,
+                    cfg_tg_token, cfg_idc_url, cfg_cw_url,
+                    cfg_default_model, cfg_model_map,
+                ],
+                outputs=[save_status],
+            )
+
+        with gr.Tab(id='mcp', label='MCP Config'):
+            # MCP Config Section
+            gr.Markdown("---\n### 🔧 MCP Servers 配置\n编辑 `~/.config/kiro2chat/mcp.json`")
+
+            def load_mcp_json():
+                cfg = load_mcp_config()
+                return json.dumps(cfg, indent=2, ensure_ascii=False)
+
+            mcp_json = gr.Code(label="mcp.json", value=load_mcp_json(), language="json")
+
+            def save_mcp_json(mcp_text):
+                try:
+                    data = json.loads(mcp_text)
+                    save_mcp_config(data)
+                    return "✅ MCP 配置已保存！使用 Reload 按钮加载。"
+                except json.JSONDecodeError as e:
+                    return f"❌ JSON 解析错误: {e}"
+                except Exception as e:
+                    return f"❌ 保存失败: {e}"
+
+            mcp_save_btn = gr.Button("💾 保存 MCP 配置", variant="secondary")
+            mcp_status = gr.Markdown("")
+            mcp_save_btn.click(fn=save_mcp_json, inputs=[mcp_json], outputs=[mcp_status])
 
     return demo
 

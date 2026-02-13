@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 
-from kiro2chat import __version__
+from . import __version__
 from .config import config
 from .core import TokenManager
 from .core.client import CodeWhispererClient
@@ -50,9 +50,12 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Cleanup
-    from .agent import cleanup_mcp_clients
-    cleanup_mcp_clients(mcp_clients)
+    # Cleanup MCP clients
+    for client in mcp_clients:
+        try:
+            client.__exit__(None, None, None)
+        except Exception:
+            pass
     await tm.close()
     await cw.close()
 
@@ -86,11 +89,10 @@ async def root():
 def run_api():
     """Run the API server."""
     uvicorn.run(
-        "kiro2chat.app:app",
+        "src.app:app",
         host=config.host,
         port=config.port,
         log_level=config.log_level,
-        workers=4,  # Multiple workers to avoid deadlock when agent calls back to localhost
     )
 
 
@@ -107,12 +109,6 @@ def run_bot():
     asyncio.run(_run_bot())
 
 
-def run_agent():
-    """Run the interactive agent chat."""
-    from .agent import interactive_chat
-    interactive_chat()
-
-
 def run_all():
     """Run API + WebUI + Bot together."""
     import threading
@@ -122,7 +118,7 @@ def run_all():
     api_thread = threading.Thread(
         target=uvicorn.run,
         kwargs={
-            "app": "kiro2chat.app:app",
+            "app": "src.app:app",
             "host": config.host,
             "port": config.port,
             "log_level": config.log_level,
@@ -132,9 +128,13 @@ def run_all():
     api_thread.start()
     logger.info("🚀 API server starting on port %d", config.port)
 
-    # Start bot in a thread if token is available
+    # Start bot in a thread if token is available (no signal handling in sub-thread)
     if get_bot_token():
-        bot_thread = threading.Thread(target=run_bot, daemon=True)
+        def _run_bot_no_signals():
+            from .bot.telegram import run_bot as _run_bot
+            asyncio.run(_run_bot(handle_signals=False))
+
+        bot_thread = threading.Thread(target=_run_bot_no_signals, daemon=True)
         bot_thread.start()
         logger.info("🤖 Telegram bot starting")
     else:
@@ -152,7 +152,6 @@ Commands:
   api     Start the API server (default)
   webui   Start the Gradio Web UI
   bot     Start the Telegram bot
-  agent   Start interactive agent chat (with MCP tools)
   all     Start API + Web UI + Bot together
 
 Options:
@@ -172,8 +171,6 @@ def main():
         run_webui()
     elif cmd == "bot":
         run_bot()
-    elif cmd == "agent":
-        run_agent()
     elif cmd == "all":
         run_all()
     else:

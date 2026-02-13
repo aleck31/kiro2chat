@@ -4,7 +4,7 @@ Kiro to Chat — 利用 Kiro CLI 的认证，将 AWS CodeWhisperer 后端的 Cla
 
 ## 版本
 
-**v0.4.0** — 版本号定义在 `src/kiro2chat/__init__.py`，pyproject.toml 通过 hatch 动态读取。
+**v0.4.0** — 版本号定义在 `src/__init__.py`，pyproject.toml 通过 hatch 动态读取。
 
 ## 技术架构
 
@@ -17,7 +17,7 @@ Kiro to Chat — 利用 Kiro CLI 的认证，将 AWS CodeWhisperer 后端的 Cla
 │  WebUI  ─┤─→ /v1/agent/chat ─→ Strands Agent           │
 │  CLI    ─┘                      (built-in + MCP tools)  │
 │                                       │                  │
-│                                       ↓ LiteLLM         │
+│                                       ↓                │
 │                              /v1/chat/completions        │
 │                                       │                  │
 ├───────────────────────────────────────┼──────────────────┤
@@ -40,12 +40,10 @@ Kiro to Chat — 利用 Kiro CLI 的认证，将 AWS CodeWhisperer 后端的 Cla
 
 2. **Kiro 后端注入的 System Prompt**：CodeWhisperer 会注入 Kiro IDE 的 system prompt，包含大量 IDE 工具定义（readFile, fsWrite, webSearch 等）。这些工具只在 Kiro IDE 内有效，通过 kiro2chat 调用时无法执行。当前用 system prompt 告知 Claude 忽略这些，但效果有限。
 
-3. **模型映射不完整**：Opus 系列模型的 CodeWhisperer model ID 未验证，已从配置中移除。Haiku 使用 `auto` 作为 model ID，未充分测试。
-
 ## 项目结构
 
 ```
-src/kiro2chat/
+kiro2chat/src/
 ├── __init__.py           # 版本号 (__version__)
 ├── _tool_names.py        # 内置工具名称注册（避免循环导入）
 ├── app.py                # 入口，FastAPI app，lifespan，CLI 子命令
@@ -159,7 +157,6 @@ uv sync
 uv run kiro2chat api      # API server (端口 8000, 4 workers)
 uv run kiro2chat webui     # Web UI (端口 7860)
 uv run kiro2chat bot       # Telegram Bot
-uv run kiro2chat agent     # 终端交互模式
 uv run kiro2chat all       # 全部一起启动
 ```
 

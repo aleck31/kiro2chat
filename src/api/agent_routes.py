@@ -16,14 +16,50 @@ router = APIRouter(prefix="/v1/agent")
 _agent: Any = None
 _mcp_clients: list = []
 _mcp_config: dict = {}
+_loaded_mcp_tools: list[dict] = []  # Actual loaded tools per server
+
+
+def _snapshot_loaded_tools(mcp_config: dict, mcp_clients: list) -> list[dict]:
+    """Build a snapshot of actually loaded MCP tools from running clients."""
+    servers = mcp_config.get("mcpServers", {})
+    # Only include stdio servers (matching the filter in create_mcp_clients)
+    stdio_names = [
+        name for name, cfg in servers.items()
+        if cfg.get("type", "stdio") not in ("http", "sse") and cfg.get("command", "")
+    ]
+    result = []
+    for i, client in enumerate(mcp_clients):
+        name = stdio_names[i] if i < len(stdio_names) else f"server-{i}"
+        cfg = servers.get(name, {})
+        try:
+            tools = client.list_tools_sync()
+            result.append({
+                "server": name,
+                "command": cfg.get("command", ""),
+                "args": cfg.get("args", []),
+                "tools": [t.tool_name for t in tools],
+                "tool_count": len(tools),
+                "status": "ok",
+            })
+        except Exception as e:
+            result.append({
+                "server": name,
+                "command": cfg.get("command", ""),
+                "args": cfg.get("args", []),
+                "tools": [],
+                "tool_count": 0,
+                "status": f"error: {e}",
+            })
+    return result
 
 
 def init_agent_routes(agent: Any, mcp_clients: list, mcp_config: dict) -> None:
     """Initialize agent routes with shared agent instance."""
-    global _agent, _mcp_clients, _mcp_config
+    global _agent, _mcp_clients, _mcp_config, _loaded_mcp_tools
     _agent = agent
     _mcp_clients = mcp_clients
     _mcp_config = mcp_config
+    _loaded_mcp_tools = _snapshot_loaded_tools(mcp_config, mcp_clients)
 
 
 async def _stream_agent_sse(message: str) -> AsyncIterator[str]:
@@ -123,9 +159,9 @@ async def agent_chat(request: Request):
             },
         )
 
-    # Non-streaming: call agent synchronously
+    # Non-streaming: use async to avoid blocking the event loop
     try:
-        result = _agent(message)
+        result = await _agent.invoke_async(message)
 
         content = ""
         tool_uses = []
@@ -158,22 +194,16 @@ async def agent_chat(request: Request):
 
 @router.get("/tools")
 async def list_tools():
-    """List loaded tools (built-in + MCP)."""
+    """List actually loaded tools (built-in + MCP)."""
     from .._tool_names import BUILTIN_TOOL_NAMES
 
     builtin = [{"name": n, "source": "builtin"} for n in BUILTIN_TOOL_NAMES]
 
-    mcp_tools = []
-    servers = _mcp_config.get("mcpServers", {})
-    for name, cfg in servers.items():
-        mcp_tools.append({
-            "server": name,
-            "source": "mcp",
-            "command": cfg.get("command", ""),
-            "args": cfg.get("args", []),
-        })
-
-    return {"builtin": builtin, "mcp": mcp_tools}
+    return {
+        "builtin": builtin,
+        "mcp": _loaded_mcp_tools,
+        "total_mcp_tools": sum(s.get("tool_count", 0) for s in _loaded_mcp_tools),
+    }
 
 
 @router.post("/reload")
@@ -182,7 +212,7 @@ async def reload_tools():
     from ..agent import create_mcp_clients, cleanup_mcp_clients
     from ..config_manager import load_mcp_config
 
-    global _mcp_clients, _mcp_config
+    global _mcp_clients, _mcp_config, _loaded_mcp_tools
 
     cleanup_mcp_clients(_mcp_clients)
 
@@ -192,13 +222,15 @@ async def reload_tools():
     tools = []
     for client in _mcp_clients:
         try:
-            client.__enter__()
-            tools.extend(client.list_tools())
+            client.start()
+            tools.extend(client.list_tools_sync())
         except Exception as e:
             logger.error(f"Failed to start MCP client on reload: {e}")
 
     if _agent is not None:
         _agent.tool_registry.process_tools(tools)
+
+    _loaded_mcp_tools = _snapshot_loaded_tools(_mcp_config, _mcp_clients)
 
     return {
         "status": "ok",
