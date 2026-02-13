@@ -90,6 +90,7 @@ def run_api():
         host=config.host,
         port=config.port,
         log_level=config.log_level,
+        workers=4,  # Multiple workers to avoid deadlock when agent calls back to localhost
     )
 
 

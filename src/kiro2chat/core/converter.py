@@ -154,7 +154,7 @@ def openai_to_codewhisperer(
     # Build the request
     cw_req: dict[str, Any] = {
         "conversationState": {
-            "chatTriggerType": "AUTO" if cw_tools else "MANUAL",
+            "chatTriggerType": "MANUAL",
             "conversationId": conv_id,
             "currentMessage": {
                 "userInputMessage": {

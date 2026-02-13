@@ -72,6 +72,9 @@ async def chat_completions(
     _check_auth(authorization, x_api_key)
 
     body = await request.json()
+    logger.info(f"📥 chat_completions request: model={body.get('model')}, messages={len(body.get('messages', []))}, tools={len(body.get('tools', []) or [])}, stream={body.get('stream')}")
+    if body.get("tools"):
+        logger.info(f"📥 tools: {[t.get('function', {}).get('name', '?') for t in body['tools'][:10]]}")
     messages = body.get("messages", [])
     model = body.get("model", config.default_model)
     stream = body.get("stream", False)

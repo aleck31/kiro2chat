@@ -38,6 +38,9 @@ class CodeWhispererClient:
             conversation_id=conversation_id,
         )
 
+        import json as _json
+        logger.info(f"📤 CW request: {_json.dumps(cw_req, ensure_ascii=False)[:2000]}")
+
         async with self._http.stream(
             "POST",
             config.codewhisperer_url,
