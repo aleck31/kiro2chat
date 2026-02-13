@@ -25,6 +25,16 @@ router = Router()
 user_models: dict[int, str] = {}
 user_histories: dict[int, list[dict]] = defaultdict(list)
 
+# Curated model list for TG menu (short names only, no date aliases)
+MENU_MODELS = [
+    "claude-opus-4-6",
+    "claude-opus-4-5",
+    "claude-sonnet-4-5",
+    "claude-sonnet-4",
+    "claude-3.7-sonnet",
+    "claude-haiku-4-5",
+]
+
 
 def _get_models() -> list[str]:
     try:
@@ -113,11 +123,10 @@ async def cmd_clear(message: Message):
 @router.message(Command("model"))
 async def cmd_model(message: Message):
     args = (message.text or "").split(maxsplit=1)
-    models = _get_models()
 
     if len(args) < 2:
-        current = user_models.get(message.from_user.id, models[0] if models else "?")
-        model_list = "\n".join(f"• `{m}`" for m in models)
+        current = user_models.get(message.from_user.id, "claude-sonnet-4-5")
+        model_list = "\n".join(f"• `{m}`" for m in MENU_MODELS)
         await message.answer(
             f"Current model: `{current}`\n\nAvailable:\n{model_list}\n\n"
             f"Set with: `/model <name>`",
@@ -126,7 +135,9 @@ async def cmd_model(message: Message):
         return
 
     chosen = args[1].strip()
-    if chosen not in models:
+    # Check against all known models (including aliases)
+    all_models = list(_get_models())
+    if chosen not in all_models:
         await message.answer(f"Unknown model `{chosen}`", parse_mode=ParseMode.MARKDOWN)
         return
 
@@ -138,7 +149,7 @@ async def cmd_model(message: Message):
 async def handle_message(message: Message):
     user_id = message.from_user.id
     models = _get_models()
-    model = user_models.get(user_id, models[0] if models else "claude-sonnet-4-20250514")
+    model = user_models.get(user_id, "claude-sonnet-4-5")
 
     reply = await message.answer("⏳ Thinking...")
 

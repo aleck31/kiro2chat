@@ -64,18 +64,27 @@ class Config:
 
     # Model mapping: OpenAI model name -> CodeWhisperer model ID
     model_map: dict[str, str] = field(default_factory=lambda: {
+        # Opus 4.6
+        "claude-opus-4-6": "claude-opus-4.6",
+        # Opus 4.5
+        "claude-opus-4-5": "claude-opus-4.5",
+        "claude-opus-4-5-20251101": "claude-opus-4.5",
+        # Sonnet 4.5
         "claude-sonnet-4-5": "CLAUDE_SONNET_4_5_20250929_V1_0",
         "claude-sonnet-4-5-20250929": "CLAUDE_SONNET_4_5_20250929_V1_0",
+        # Sonnet 4
         "claude-sonnet-4": "CLAUDE_SONNET_4_20250514_V1_0",
         "claude-sonnet-4-20250514": "CLAUDE_SONNET_4_20250514_V1_0",
+        # Sonnet 3.7
         "claude-3.7-sonnet": "CLAUDE_3_7_SONNET_20250219_V1_0",
         "claude-3-7-sonnet-20250219": "CLAUDE_3_7_SONNET_20250219_V1_0",
-        "claude-3-5-haiku-20241022": "auto",
-        "claude-haiku-4-5": "auto",
+        # Haiku 4.5
+        "claude-haiku-4-5": "claude-haiku-4.5",
+        "claude-3-5-haiku-20241022": "claude-haiku-4.5",
     })
 
     # Default model when client doesn't specify
-    default_model: str = _get("default_model", "DEFAULT_MODEL", "claude-sonnet-4-20250514")
+    default_model: str = _get("default_model", "DEFAULT_MODEL", "claude-sonnet-4-5")
 
 
 config = Config()
