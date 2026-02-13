@@ -179,6 +179,29 @@ def refresh_monitoring():
 # Build UI
 # ---------------------------------------------------------------------------
 
+def _get_tools_display() -> str:
+    """Build markdown display of loaded tools."""
+    from ._tool_names import BUILTIN_TOOL_NAMES
+    from .config_manager import load_mcp_config
+
+    lines = ["### 🛠 已加载的工具\n", "**内置工具:**"]
+    for name in BUILTIN_TOOL_NAMES:
+        lines.append(f"- `{name}`")
+
+    mcp_cfg = load_mcp_config()
+    servers = mcp_cfg.get("mcpServers", {})
+    if servers:
+        lines.append(f"\n**MCP 服务 ({len(servers)}):**")
+        for name, cfg in servers.items():
+            cmd = cfg.get("command", "?")
+            args = " ".join(cfg.get("args", [])[:2])
+            lines.append(f"- `{name}` — {cmd} {args}")
+    else:
+        lines.append("\n**MCP 服务:** (无)")
+
+    return "\n".join(lines)
+
+
 def create_ui() -> gr.Blocks:
     models = get_models()
 
@@ -187,11 +210,29 @@ def create_ui() -> gr.Blocks:
 
         gr.Markdown("# 🤖 kiro2chat\nChat with Claude via Kiro/CodeWhisperer")
 
-        model_dd = gr.Dropdown(
-            choices=models,
-            value=models[0] if models else None,
-            label="模型选择",
-            interactive=True,
+        with gr.Row():
+            model_dd = gr.Dropdown(
+                choices=models,
+                value=models[0] if models else None,
+                label="模型选择",
+                interactive=True,
+                scale=3,
+            )
+            tools_btn = gr.Button("🛠 工具列表", scale=1)
+
+        tools_display = gr.Markdown(visible=False)
+        tools_state = gr.State(value=False)
+
+        def toggle_tools(visible):
+            if not visible:
+                return gr.update(value=_get_tools_display(), visible=True), True
+            else:
+                return gr.update(visible=False), False
+
+        tools_btn.click(
+            fn=toggle_tools,
+            inputs=[tools_state],
+            outputs=[tools_display, tools_state],
         )
 
         gr.ChatInterface(
