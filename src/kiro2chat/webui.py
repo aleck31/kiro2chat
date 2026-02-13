@@ -1,27 +1,36 @@
-"""Gradio Web UI for kiro2chat."""
+"""Gradio Web UI for kiro2chat - Multi-page app with Navbar."""
 
 import json
+import platform
+import time
+from datetime import datetime, timezone, timedelta
+
 import httpx
 import gradio as gr
 
-API_BASE = "http://localhost:8000"
+from .config import config
+from .config_manager import load_config_file, save_config_file
+from .stats import stats
 
+API_BASE = "http://localhost:8000"
+TZ_CST = timezone(timedelta(hours=8))
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def get_models() -> list[str]:
-    """Fetch available models from the API."""
     try:
         resp = httpx.get(f"{API_BASE}/v1/models", timeout=5)
         resp.raise_for_status()
         return [m["id"] for m in resp.json()["data"]]
     except Exception:
-        return ["claude-sonnet-4-20250514"]
+        return list(config.model_map.keys())
 
 
 def chat_stream(message: str, history: list[dict], model: str):
-    """Stream chat response from the API."""
-    messages = []
-    for msg in history:
-        messages.append({"role": msg["role"], "content": msg["content"]})
+    messages = [{"role": m["role"], "content": m["content"]} for m in history]
     messages.append({"role": "user", "content": message})
 
     with httpx.stream(
@@ -45,31 +54,234 @@ def chat_stream(message: str, history: list[dict], model: str):
                 yield full
 
 
+# ---------------------------------------------------------------------------
+# Config page helpers
+# ---------------------------------------------------------------------------
+
+def _tg_bot_token() -> str:
+    """Get TG bot token from config or env."""
+    import os
+    return os.environ.get("TG_BOT_TOKEN", "")
+
+
+def load_config_values():
+    cfg = load_config_file()
+    c = config
+    return (
+        cfg.get("host", c.host),
+        int(cfg.get("port", c.port)),
+        cfg.get("log_level", c.log_level),
+        cfg.get("api_key", c.api_key or ""),
+        cfg.get("kiro_db_path", c.kiro_db_path),
+        cfg.get("tg_bot_token", _tg_bot_token()),
+        cfg.get("idc_refresh_url", c.idc_refresh_url),
+        cfg.get("codewhisperer_url", c.codewhisperer_url),
+        cfg.get("default_model", c.default_model),
+        json.dumps(cfg.get("model_map", dict(c.model_map)), indent=2, ensure_ascii=False),
+    )
+
+
+def save_config(host, port, log_level, api_key, kiro_db_path,
+                tg_bot_token, idc_refresh_url, codewhisperer_url,
+                default_model, model_map_json):
+    try:
+        model_map = json.loads(model_map_json) if model_map_json.strip() else {}
+    except json.JSONDecodeError as e:
+        return f"❌ model_map JSON 解析错误: {e}"
+
+    data = {
+        "host": host,
+        "port": int(port),
+        "log_level": log_level,
+        "api_key": api_key,
+        "kiro_db_path": kiro_db_path,
+        "tg_bot_token": tg_bot_token,
+        "idc_refresh_url": idc_refresh_url,
+        "codewhisperer_url": codewhisperer_url,
+        "default_model": default_model,
+        "model_map": model_map,
+    }
+    try:
+        save_config_file(data)
+        return "✅ 配置已保存！重启服务后生效。"
+    except Exception as e:
+        return f"❌ 保存失败: {e}"
+
+
+# ---------------------------------------------------------------------------
+# Monitoring page helpers
+# ---------------------------------------------------------------------------
+
+def get_stats_display():
+    s = stats.get_summary()
+    uptime_s = s["uptime_seconds"]
+    h, rem = divmod(int(uptime_s), 3600)
+    m, sec = divmod(rem, 60)
+    uptime_str = f"{h}h {m}m {sec}s"
+
+    summary_md = f"""### 📊 请求统计
+| 指标 | 值 |
+|------|-----|
+| 总请求数 | {s['total_requests']} |
+| 成功 | {s['total_success']} |
+| 错误 | {s['total_errors']} |
+| 平均延迟 | {s['avg_latency_ms']:.1f} ms |
+"""
+
+    sys_md = f"""### 🖥️ 系统信息
+| 项目 | 值 |
+|------|-----|
+| 运行时间 | {uptime_str} |
+| Python | {platform.python_version()} |
+| 平台 | {platform.platform()} |
+| 默认模型 | {config.default_model} |
+"""
+
+    try:
+        resp = httpx.get(f"{API_BASE}/", timeout=3)
+        api_status = "🟢 运行中" if resp.status_code == 200 else f"🔴 状态码 {resp.status_code}"
+    except Exception:
+        api_status = "🔴 无法连接"
+
+    token_md = f"""### 🔑 服务状态
+| 项目 | 值 |
+|------|-----|
+| API 服务 | {api_status} |
+| 可用模型 | {', '.join(config.model_map.keys())} |
+"""
+
+    return summary_md, sys_md, token_md
+
+
+def get_recent_logs():
+    records = stats.get_recent(20)
+    if not records:
+        return "暂无请求记录"
+
+    rows = []
+    for r in reversed(records):
+        ts = datetime.fromtimestamp(r.timestamp, tz=TZ_CST).strftime("%H:%M:%S")
+        status_icon = "✅" if r.status == "ok" else "❌"
+        err = f" ({r.error[:40]})" if r.error else ""
+        rows.append(f"| {ts} | {r.model} | {r.latency_ms:.0f}ms | {status_icon}{err} |")
+
+    header = "| 时间 | 模型 | 延迟 | 状态 |\n|------|------|------|------|\n"
+    return "### 📋 最近请求\n" + header + "\n".join(rows)
+
+
+def refresh_monitoring():
+    summary_md, sys_md, token_md = get_stats_display()
+    logs_md = get_recent_logs()
+    return summary_md, sys_md, token_md, logs_md
+
+
+# ---------------------------------------------------------------------------
+# Build UI
+# ---------------------------------------------------------------------------
+
 def create_ui() -> gr.Blocks:
-    """Create and return the Gradio Blocks app."""
     models = get_models()
 
-    with gr.Blocks(title="kiro2chat", theme=gr.themes.Soft()) as demo:
+    with gr.Blocks(title="kiro2chat") as demo:
+        gr.Navbar()
+
         gr.Markdown("# 🤖 kiro2chat\nChat with Claude via Kiro/CodeWhisperer")
 
-        model_dropdown = gr.Dropdown(
+        model_dd = gr.Dropdown(
             choices=models,
             value=models[0] if models else None,
-            label="Model",
+            label="模型选择",
             interactive=True,
         )
 
         gr.ChatInterface(
             fn=chat_stream,
-            type="messages",
-            additional_inputs=[model_dropdown],
+            additional_inputs=[model_dd],
+        )
+
+    # ---- Config Page ----
+    with demo.route("⚙️ 系统配置", "/settings"):
+        gr.Markdown("# ⚙️ 系统配置\n编辑后点击保存，重启服务生效。")
+
+        defaults = load_config_values()
+
+        with gr.Row():
+            with gr.Column():
+                gr.Markdown("### 🌐 服务器")
+                cfg_host = gr.Textbox(label="Host", value=defaults[0])
+                cfg_port = gr.Number(label="Port", value=defaults[1], precision=0)
+                cfg_log_level = gr.Dropdown(
+                    choices=["debug", "info", "warning", "error"],
+                    value=defaults[2],
+                    label="日志级别",
+                )
+
+            with gr.Column():
+                gr.Markdown("### 🔐 认证")
+                cfg_api_key = gr.Textbox(label="API Key", value=defaults[3], type="password")
+
+                gr.Markdown("### 📂 Kiro")
+                cfg_kiro_db = gr.Textbox(label="kiro_db_path", value=defaults[4])
+
+        with gr.Row():
+            with gr.Column():
+                gr.Markdown("### 🤖 Telegram Bot")
+                cfg_tg_token = gr.Textbox(label="tg_bot_token", value=defaults[5], type="password")
+
+            with gr.Column():
+                gr.Markdown("### ☁️ AWS 端点")
+                cfg_idc_url = gr.Textbox(label="idc_refresh_url", value=defaults[6])
+                cfg_cw_url = gr.Textbox(label="codewhisperer_url", value=defaults[7])
+
+        gr.Markdown("### 🧠 模型配置")
+        cfg_default_model = gr.Textbox(label="默认模型", value=defaults[8])
+        cfg_model_map = gr.Code(label="model_map (JSON)", value=defaults[9], language="json")
+
+        save_btn = gr.Button("💾 保存配置", variant="primary")
+        save_status = gr.Markdown("")
+
+        save_btn.click(
+            fn=save_config,
+            inputs=[
+                cfg_host, cfg_port, cfg_log_level, cfg_api_key, cfg_kiro_db,
+                cfg_tg_token, cfg_idc_url, cfg_cw_url,
+                cfg_default_model, cfg_model_map,
+            ],
+            outputs=[save_status],
+        )
+
+    # ---- Monitoring Page ----
+    with demo.route("📊 监控面板", "/monitor"):
+        gr.Markdown("# 📊 监控面板")
+
+        with gr.Row():
+            stats_md = gr.Markdown("加载中...")
+            sys_info_md = gr.Markdown("加载中...")
+            token_md = gr.Markdown("加载中...")
+
+        logs_md = gr.Markdown("加载中...")
+
+        refresh_btn = gr.Button("🔄 刷新")
+        timer = gr.Timer(value=5)
+
+        refresh_btn.click(
+            fn=refresh_monitoring,
+            outputs=[stats_md, sys_info_md, token_md, logs_md],
+        )
+        timer.tick(
+            fn=refresh_monitoring,
+            outputs=[stats_md, sys_info_md, token_md, logs_md],
+        )
+
+        demo.load(
+            fn=refresh_monitoring,
+            outputs=[stats_md, sys_info_md, token_md, logs_md],
         )
 
     return demo
 
 
 def main():
-    """Launch the Web UI standalone."""
     demo = create_ui()
     demo.launch(server_name="0.0.0.0", server_port=7860)
 

@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="kiro2chat",
     description="Kiro to Chat - OpenAI-compatible API powered by Kiro/CodeWhisperer",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -55,7 +55,7 @@ app.include_router(router)
 async def root():
     return {
         "name": "kiro2chat",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "status": "running",
         "endpoints": {
             "models": "/v1/models",

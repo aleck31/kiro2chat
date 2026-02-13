@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from ..config import config
 from ..core import TokenManager
 from ..core.client import CodeWhispererClient
+from ..stats import stats
 
 logger = logging.getLogger(__name__)
 
@@ -86,12 +87,13 @@ async def chat_completions(
             detail=f"Unknown model: {model}. Available: {list(config.model_map.keys())}",
         )
 
+    t0 = time.time()
     access_token = await token_manager.get_access_token()
     profile_arn = token_manager.profile_arn
 
     if stream:
         return StreamingResponse(
-            _stream_response(access_token, messages, model, profile_arn, tools),
+            _stream_response(access_token, messages, model, profile_arn, tools, t0),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -100,9 +102,12 @@ async def chat_completions(
             },
         )
     else:
-        return await _non_stream_response(
+        resp = await _non_stream_response(
             access_token, messages, model, profile_arn, tools
         )
+        latency = (time.time() - t0) * 1000
+        stats.record(model=model, latency_ms=latency, status="ok")
+        return resp
 
 
 async def _stream_response(
@@ -111,6 +116,7 @@ async def _stream_response(
     model: str,
     profile_arn: str,
     tools: list[dict] | None,
+    t0: float = 0,
 ) -> AsyncIterator[str]:
     """Generate SSE stream in OpenAI format."""
     chat_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
@@ -178,9 +184,11 @@ async def _stream_response(
         }
         yield f"data: {json.dumps(final_chunk)}\n\n"
         yield "data: [DONE]\n\n"
+        stats.record(model=model, latency_ms=(time.time() - t0) * 1000, status="ok")
 
     except Exception as e:
         logger.error(f"Stream error: {e}")
+        stats.record(model=model, latency_ms=(time.time() - t0) * 1000, status="error", error=str(e))
         error_chunk = {
             "id": chat_id,
             "object": "chat.completion.chunk",

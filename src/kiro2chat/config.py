@@ -8,22 +8,56 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _load_toml_defaults() -> dict:
+    """Load defaults from config.toml (if exists)."""
+    try:
+        from .config_manager import load_config_file
+        return load_config_file()
+    except Exception:
+        return {}
+
+
+_file_cfg = _load_toml_defaults()
+
+
+def _get(key: str, env_key: str | None = None, default: str | None = None) -> str | None:
+    """Get config value: env var > toml file > default."""
+    env = env_key or key.upper()
+    val = os.getenv(env)
+    if val is not None:
+        return val
+    val = _file_cfg.get(key)
+    if val is not None:
+        return str(val)
+    return default
+
+
 @dataclass
 class Config:
-    port: int = int(os.getenv("PORT", "8000"))
-    host: str = os.getenv("HOST", "0.0.0.0")
-    api_key: str | None = os.getenv("API_KEY")
-    log_level: str = os.getenv("LOG_LEVEL", "info")
+    port: int = int(_get("port", "PORT", "8000"))
+    host: str = _get("host", "HOST", "0.0.0.0")
+    api_key: str | None = _get("api_key", "API_KEY")
+    log_level: str = _get("log_level", "LOG_LEVEL", "info")
 
     # kiro-cli SQLite database path
-    kiro_db_path: str = os.getenv(
+    kiro_db_path: str = _get(
+        "kiro_db_path",
         "KIRO_DB_PATH",
         str(Path.home() / ".local/share/kiro-cli/data.sqlite3"),
     )
 
+    # Telegram bot
+    tg_bot_token: str | None = _get("tg_bot_token", "TG_BOT_TOKEN")
+
     # AWS endpoints
-    idc_refresh_url: str = "https://oidc.us-east-1.amazonaws.com/token"
-    codewhisperer_url: str = "https://codewhisperer.us-east-1.amazonaws.com/generateAssistantResponse"
+    idc_refresh_url: str = _get(
+        "idc_refresh_url", "IDC_REFRESH_URL",
+        "https://oidc.us-east-1.amazonaws.com/token",
+    )
+    codewhisperer_url: str = _get(
+        "codewhisperer_url", "CODEWHISPERER_URL",
+        "https://codewhisperer.us-east-1.amazonaws.com/generateAssistantResponse",
+    )
 
     # CodeWhisperer profile ARN (read from kiro-cli state)
     profile_arn: str = os.getenv("PROFILE_ARN", "")
@@ -41,7 +75,7 @@ class Config:
     })
 
     # Default model when client doesn't specify
-    default_model: str = "claude-sonnet-4-20250514"
+    default_model: str = _get("default_model", "DEFAULT_MODEL", "claude-sonnet-4-20250514")
 
 
 config = Config()
