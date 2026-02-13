@@ -1,5 +1,6 @@
 """Telegram bot for kiro2chat."""
 
+import asyncio
 import os
 import json
 import logging
@@ -17,13 +18,21 @@ logger = logging.getLogger(__name__)
 
 API_BASE = "http://localhost:8000"
 EDIT_INTERVAL = 15  # edit message every N chunks to avoid rate limits
-MAX_HISTORY = 20  # max messages per user in history
+MAX_HISTORY = 20  # max messages per session in history
 
 router = Router()
 
-# Per-user state
-user_models: dict[int, str] = {}
-user_histories: dict[int, list[dict]] = defaultdict(list)
+# Session key = (chat_id, user_id) for group isolation
+# In private chats: chat_id == user_id
+# In groups: each user has their own session per group
+SessionKey = tuple[int, int]
+
+# Per-session state
+session_models: dict[SessionKey, str] = {}
+session_histories: dict[SessionKey, list[dict]] = defaultdict(list)
+
+# Per-session locks to prevent message ordering issues
+session_locks: dict[SessionKey, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 # Curated model list for TG menu (short names only, no date aliases)
 MENU_MODELS = [
@@ -36,26 +45,25 @@ MENU_MODELS = [
 ]
 
 
+def _session_key(message: Message) -> SessionKey:
+    """Get session key: (chat_id, user_id) for group isolation."""
+    return (message.chat.id, message.from_user.id)
+
+
 def _get_models() -> list[str]:
     try:
         resp = httpx.get(f"{API_BASE}/v1/models", timeout=5)
         resp.raise_for_status()
         return [m["id"] for m in resp.json()["data"]]
     except Exception:
-        return ["claude-sonnet-4-20250514"]
+        return ["claude-sonnet-4-5"]
 
 
 def _clean_response(text: str) -> str:
     """Remove raw tool call XML/markup from response text for display."""
-    # Remove <function_calls>...</function_calls> blocks
     text = re.sub(r"<function_calls>.*?</function_calls>", "", text, flags=re.DOTALL)
-    # Remove <invoke>...</invoke> blocks
     text = re.sub(r"<invoke.*?</invoke>", "", text, flags=re.DOTALL)
-    # Remove <invoke>...</invoke> blocks
-    text = re.sub(r"<invoke.*?</invoke>", "", text, flags=re.DOTALL)
-    # Remove <tool_call>...</tool_call> blocks
     text = re.sub(r"<tool_call>.*?</tool_call>", "", text, flags=re.DOTALL)
-    # Clean up excessive whitespace
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
@@ -78,15 +86,14 @@ def _format_tool_calls(tool_calls: list[dict]) -> str:
     return "\n".join(parts)
 
 
-def _add_to_history(user_id: int, role: str, content: str, tool_calls: list | None = None):
-    """Add a message to user's conversation history."""
+def _add_to_history(key: SessionKey, role: str, content: str, tool_calls: list | None = None):
+    """Add a message to session's conversation history."""
     msg: dict = {"role": role, "content": content}
     if tool_calls:
         msg["tool_calls"] = tool_calls
-    user_histories[user_id].append(msg)
-    # Trim history
-    if len(user_histories[user_id]) > MAX_HISTORY:
-        user_histories[user_id] = user_histories[user_id][-MAX_HISTORY:]
+    session_histories[key].append(msg)
+    if len(session_histories[key]) > MAX_HISTORY:
+        session_histories[key] = session_histories[key][-MAX_HISTORY:]
 
 
 @router.message(Command("start"))
@@ -115,17 +122,18 @@ async def cmd_help(message: Message):
 
 @router.message(Command("clear"))
 async def cmd_clear(message: Message):
-    user_id = message.from_user.id
-    user_histories[user_id] = []
+    key = _session_key(message)
+    session_histories[key] = []
     await message.answer("🗑 对话历史已清空")
 
 
 @router.message(Command("model"))
 async def cmd_model(message: Message):
+    key = _session_key(message)
     args = (message.text or "").split(maxsplit=1)
 
     if len(args) < 2:
-        current = user_models.get(message.from_user.id, "claude-sonnet-4-5")
+        current = session_models.get(key, "claude-sonnet-4-5")
         model_list = "\n".join(f"• `{m}`" for m in MENU_MODELS)
         await message.answer(
             f"Current model: `{current}`\n\nAvailable:\n{model_list}\n\n"
@@ -135,117 +143,114 @@ async def cmd_model(message: Message):
         return
 
     chosen = args[1].strip()
-    # Check against all known models (including aliases)
     all_models = list(_get_models())
     if chosen not in all_models:
         await message.answer(f"Unknown model `{chosen}`", parse_mode=ParseMode.MARKDOWN)
         return
 
-    user_models[message.from_user.id] = chosen
+    session_models[key] = chosen
     await message.answer(f"✅ Model set to `{chosen}`", parse_mode=ParseMode.MARKDOWN)
 
 
 @router.message(F.text)
 async def handle_message(message: Message):
-    user_id = message.from_user.id
-    models = _get_models()
-    model = user_models.get(user_id, "claude-sonnet-4-5")
+    key = _session_key(message)
+    model = session_models.get(key, "claude-sonnet-4-5")
 
-    reply = await message.answer("⏳ Thinking...")
+    # Acquire per-session lock to ensure message ordering
+    lock = session_locks[key]
+    if lock.locked():
+        await message.reply("⏳ 上一条消息还在处理中，请稍候...")
+        # Wait for the lock instead of dropping the message
+        async with lock:
+            pass
+        # Now re-acquire for this message
 
-    # Add user message to history
-    _add_to_history(user_id, "user", message.text)
+    async with lock:
+        reply = await message.answer("⏳ Thinking...")
 
-    # Build messages from history
-    messages = [
-        {"role": m["role"], "content": m["content"]}
-        for m in user_histories[user_id]
-    ]
+        _add_to_history(key, "user", message.text)
 
-    full = ""
-    tool_calls_collected: list[dict] = []
-    chunk_count = 0
+        messages = [
+            {"role": m["role"], "content": m["content"]}
+            for m in session_histories[key]
+        ]
 
-    try:
-        async with httpx.AsyncClient(timeout=120) as client:
-            async with client.stream(
-                "POST",
-                f"{API_BASE}/v1/chat/completions",
-                json={"model": model, "messages": messages, "stream": True},
-            ) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if not line.startswith("data: "):
-                        continue
-                    data = line[6:]
-                    if data == "[DONE]":
-                        break
-                    chunk = json.loads(data)
-                    choice = chunk["choices"][0]
-                    delta = choice.get("delta", {})
-
-                    # Collect text content
-                    content = delta.get("content", "")
-                    if content:
-                        full += content
-                        chunk_count += 1
-                        if chunk_count % EDIT_INTERVAL == 0:
-                            display = _clean_response(full)
-                            if display:
-                                try:
-                                    await reply.edit_text(display[:4096] or "...")
-                                except Exception:
-                                    pass
-
-                    # Collect tool calls
-                    if "tool_calls" in delta:
-                        for tc in delta["tool_calls"]:
-                            idx = tc.get("index", 0)
-                            while len(tool_calls_collected) <= idx:
-                                tool_calls_collected.append({
-                                    "id": "", "type": "function",
-                                    "function": {"name": "", "arguments": ""}
-                                })
-                            if tc.get("id"):
-                                tool_calls_collected[idx]["id"] = tc["id"]
-                            fn = tc.get("function", {})
-                            if fn.get("name"):
-                                tool_calls_collected[idx]["function"]["name"] = fn["name"]
-                            if fn.get("arguments"):
-                                tool_calls_collected[idx]["function"]["arguments"] += fn["arguments"]
-
-        # Build final display
-        display_parts = []
-
-        # Clean text content
-        clean_text = _clean_response(full)
-        if clean_text:
-            display_parts.append(clean_text)
-
-        # Format tool calls
-        if tool_calls_collected:
-            tool_summary = _format_tool_calls(tool_calls_collected)
-            display_parts.append(f"\n{tool_summary}")
-
-        display = "\n".join(display_parts) if display_parts else "(empty response)"
-
-        # Save assistant response to history
-        _add_to_history(user_id, "assistant", full)
+        full = ""
+        tool_calls_collected: list[dict] = []
+        chunk_count = 0
 
         try:
-            await reply.edit_text(display[:4096])
-        except Exception:
-            pass
+            async with httpx.AsyncClient(timeout=120) as client:
+                async with client.stream(
+                    "POST",
+                    f"{API_BASE}/v1/chat/completions",
+                    json={"model": model, "messages": messages, "stream": True},
+                ) as resp:
+                    resp.raise_for_status()
+                    async for line in resp.aiter_lines():
+                        if not line.startswith("data: "):
+                            continue
+                        data = line[6:]
+                        if data == "[DONE]":
+                            break
+                        chunk = json.loads(data)
+                        choice = chunk["choices"][0]
+                        delta = choice.get("delta", {})
 
-    except Exception as e:
-        logger.error(f"Chat error: {e}")
-        # Remove the failed user message from history
-        if user_histories[user_id] and user_histories[user_id][-1]["role"] == "user":
-            user_histories[user_id].pop()
-        try:
-            await reply.edit_text(f"❌ Error: {e}")
-        except Exception:
-            pass
+                        content = delta.get("content", "")
+                        if content:
+                            full += content
+                            chunk_count += 1
+                            if chunk_count % EDIT_INTERVAL == 0:
+                                display = _clean_response(full)
+                                if display:
+                                    try:
+                                        await reply.edit_text(display[:4096] or "...")
+                                    except Exception:
+                                        pass
+
+                        if "tool_calls" in delta:
+                            for tc in delta["tool_calls"]:
+                                idx = tc.get("index", 0)
+                                while len(tool_calls_collected) <= idx:
+                                    tool_calls_collected.append({
+                                        "id": "", "type": "function",
+                                        "function": {"name": "", "arguments": ""}
+                                    })
+                                if tc.get("id"):
+                                    tool_calls_collected[idx]["id"] = tc["id"]
+                                fn = tc.get("function", {})
+                                if fn.get("name"):
+                                    tool_calls_collected[idx]["function"]["name"] = fn["name"]
+                                if fn.get("arguments"):
+                                    tool_calls_collected[idx]["function"]["arguments"] += fn["arguments"]
+
+            # Build final display
+            display_parts = []
+            clean_text = _clean_response(full)
+            if clean_text:
+                display_parts.append(clean_text)
+            if tool_calls_collected:
+                display_parts.append(f"\n{_format_tool_calls(tool_calls_collected)}")
+
+            display = "\n".join(display_parts) if display_parts else "(empty response)"
+
+            _add_to_history(key, "assistant", full)
+
+            try:
+                await reply.edit_text(display[:4096])
+            except Exception:
+                pass
+
+        except Exception as e:
+            logger.error(f"Chat error: {e}")
+            if session_histories[key] and session_histories[key][-1]["role"] == "user":
+                session_histories[key].pop()
+            try:
+                await reply.edit_text(f"❌ Error: {e}")
+            except Exception:
+                pass
 
 
 def get_bot_token() -> Optional[str]:
@@ -268,7 +273,6 @@ async def run_bot():
 
 def main():
     """Launch bot standalone."""
-    import asyncio
     asyncio.run(run_bot())
 
 
