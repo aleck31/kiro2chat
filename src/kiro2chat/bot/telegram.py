@@ -1,4 +1,4 @@
-"""Telegram bot for kiro2chat."""
+"""Telegram bot for kiro2chat — powered by Strands Agent."""
 
 import asyncio
 import os
@@ -23,8 +23,6 @@ MAX_HISTORY = 20  # max messages per session in history
 router = Router()
 
 # Session key = (chat_id, user_id) for group isolation
-# In private chats: chat_id == user_id
-# In groups: each user has their own session per group
 SessionKey = tuple[int, int]
 
 # Per-session state
@@ -33,13 +31,6 @@ session_histories: dict[SessionKey, list[dict]] = defaultdict(list)
 
 # Per-session locks to prevent message ordering issues
 session_locks: dict[SessionKey, asyncio.Lock] = defaultdict(asyncio.Lock)
-
-SYSTEM_PROMPT = (
-    "你是 kiro2chat 的 AI 助手，基于 Claude 模型。"
-    "请直接用自然语言回答用户的问题。"
-    "你的环境不支持执行工具调用，请不要输出任何 XML 标签、function_calls 或工具调用格式。"
-    "如果用户需要执行操作（如搜索、运行命令），请给出具体的指令或建议，而不是尝试调用工具。"
-)
 
 # Curated model list for TG menu (short names only, no date aliases)
 MENU_MODELS = [
@@ -75,30 +66,22 @@ def _clean_response(text: str) -> str:
     return text.strip()
 
 
-def _format_tool_calls(tool_calls: list[dict]) -> str:
-    """Format tool calls into a readable summary."""
+def _format_tool_uses(tool_uses: list[dict]) -> str:
+    """Format agent tool uses into a readable summary."""
     parts = []
-    for tc in tool_calls:
-        fn = tc.get("function", {})
-        name = fn.get("name", "unknown")
-        args = fn.get("arguments", "{}")
-        try:
-            args_obj = json.loads(args) if isinstance(args, str) else args
-            args_short = ", ".join(f"{k}={v!r}" for k, v in list(args_obj.items())[:3])
-            if len(args_obj) > 3:
-                args_short += ", ..."
-        except Exception:
-            args_short = args[:50] if len(args) > 50 else args
+    for tu in tool_uses:
+        name = tu.get("name", "unknown")
+        inp = tu.get("input", {})
+        args_short = ", ".join(f"{k}={v!r}" for k, v in list(inp.items())[:3])
+        if len(inp) > 3:
+            args_short += ", ..."
         parts.append(f"🔧 {name}({args_short})")
     return "\n".join(parts)
 
 
-def _add_to_history(key: SessionKey, role: str, content: str, tool_calls: list | None = None):
+def _add_to_history(key: SessionKey, role: str, content: str):
     """Add a message to session's conversation history."""
-    msg: dict = {"role": role, "content": content}
-    if tool_calls:
-        msg["tool_calls"] = tool_calls
-    session_histories[key].append(msg)
+    session_histories[key].append({"role": role, "content": content})
     if len(session_histories[key]) > MAX_HISTORY:
         session_histories[key] = session_histories[key][-MAX_HISTORY:]
 
@@ -136,12 +119,10 @@ async def cmd_tools(message: Message):
 
     lines = ["🛠 **已加载的工具**\n"]
 
-    # Built-in tools
     lines.append("**内置工具:**")
     for name in BUILTIN_TOOL_NAMES:
         lines.append(f"  • `{name}`")
 
-    # MCP tools
     from ..config_manager import load_mcp_config
     mcp_cfg = load_mcp_config()
     servers = mcp_cfg.get("mcpServers", {})
@@ -180,7 +161,6 @@ async def cmd_model(message: Message):
         return
 
     chosen = args[1].strip()
-    # Validate against curated menu + full model map from API
     valid = set(MENU_MODELS) | set(_get_models())
     if chosen not in valid:
         await message.answer(f"Unknown model `{chosen}`", parse_mode=ParseMode.MARKDOWN)
@@ -193,88 +173,45 @@ async def cmd_model(message: Message):
 @router.message(F.text)
 async def handle_message(message: Message):
     key = _session_key(message)
-    model = session_models.get(key, "claude-sonnet-4-5")
 
     # Acquire per-session lock to ensure message ordering
     lock = session_locks[key]
     if lock.locked():
         await message.reply("⏳ 上一条消息还在处理中，请稍候...")
-        # Wait for the lock instead of dropping the message
         async with lock:
             pass
-        # Now re-acquire for this message
 
     async with lock:
         reply = await message.answer("⏳ Thinking...")
 
         _add_to_history(key, "user", message.text)
 
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + [
-            {"role": m["role"], "content": m["content"]}
-            for m in session_histories[key]
-        ]
-
-        full = ""
-        tool_calls_collected: list[dict] = []
-        chunk_count = 0
-
         try:
+            # Call agent chat endpoint (goes through Strands Agent with tools)
             async with httpx.AsyncClient(timeout=120) as client:
-                async with client.stream(
-                    "POST",
-                    f"{API_BASE}/v1/chat/completions",
-                    json={"model": model, "messages": messages, "stream": True},
-                ) as resp:
-                    resp.raise_for_status()
-                    async for line in resp.aiter_lines():
-                        if not line.startswith("data: "):
-                            continue
-                        data = line[6:]
-                        if data == "[DONE]":
-                            break
-                        chunk = json.loads(data)
-                        choice = chunk["choices"][0]
-                        delta = choice.get("delta", {})
+                resp = await client.post(
+                    f"{API_BASE}/v1/agent/chat",
+                    json={"message": message.text},
+                )
+                resp.raise_for_status()
+                result = resp.json()
 
-                        content = delta.get("content", "")
-                        if content:
-                            full += content
-                            chunk_count += 1
-                            if chunk_count % EDIT_INTERVAL == 0:
-                                display = _clean_response(full)
-                                if display:
-                                    try:
-                                        await reply.edit_text(display[:4096] or "...")
-                                    except Exception:
-                                        pass
+            content = result.get("content", "")
+            tool_uses = result.get("tool_uses", [])
 
-                        if "tool_calls" in delta:
-                            for tc in delta["tool_calls"]:
-                                idx = tc.get("index", 0)
-                                while len(tool_calls_collected) <= idx:
-                                    tool_calls_collected.append({
-                                        "id": "", "type": "function",
-                                        "function": {"name": "", "arguments": ""}
-                                    })
-                                if tc.get("id"):
-                                    tool_calls_collected[idx]["id"] = tc["id"]
-                                fn = tc.get("function", {})
-                                if fn.get("name"):
-                                    tool_calls_collected[idx]["function"]["name"] = fn["name"]
-                                if fn.get("arguments"):
-                                    tool_calls_collected[idx]["function"]["arguments"] += fn["arguments"]
-
-            # Build final display
+            # Build display
             display_parts = []
-            clean_text = _clean_response(full)
+
+            clean_text = _clean_response(content)
             if clean_text:
                 display_parts.append(clean_text)
-            if tool_calls_collected:
-                display_parts.append(f"\n{_format_tool_calls(tool_calls_collected)}")
+
+            if tool_uses:
+                display_parts.append(f"\n{_format_tool_uses(tool_uses)}")
 
             display = "\n".join(display_parts) if display_parts else "(empty response)"
 
-            _add_to_history(key, "assistant", full)
+            _add_to_history(key, "assistant", content)
 
             try:
                 await reply.edit_text(display[:4096])
@@ -306,7 +243,6 @@ async def run_bot():
     dp = Dispatcher()
     dp.include_router(router)
 
-    # Register bot commands menu
     await bot.set_my_commands([
         BotCommand(command="model", description="切换/查看模型"),
         BotCommand(command="tools", description="查看已加载工具"),
