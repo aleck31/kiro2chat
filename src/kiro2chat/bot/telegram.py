@@ -102,6 +102,7 @@ async def cmd_start(message: Message):
         "👋 Hi! I'm kiro2chat — send me a message and I'll reply with Claude.\n\n"
         "Commands:\n"
         "/model — switch model\n"
+        "/tools — view loaded tools\n"
         "/clear — clear conversation history\n"
         "/help — show this help"
     )
@@ -114,10 +115,39 @@ async def cmd_help(message: Message):
         "Just send a text message to chat with Claude.\n\n"
         "/model `<name>` — set model\n"
         "/model — list available models\n"
+        "/tools — view loaded tools\n"
         "/clear — clear conversation history\n"
         "/help — show this help",
         parse_mode=ParseMode.MARKDOWN,
     )
+
+
+@router.message(Command("tools"))
+async def cmd_tools(message: Message):
+    """Show loaded built-in and MCP tools."""
+    from .._tool_names import BUILTIN_TOOL_NAMES
+
+    lines = ["🛠 **已加载的工具**\n"]
+
+    # Built-in tools
+    lines.append("**内置工具:**")
+    for name in BUILTIN_TOOL_NAMES:
+        lines.append(f"  • `{name}`")
+
+    # MCP tools
+    from ..config_manager import load_mcp_config
+    mcp_cfg = load_mcp_config()
+    servers = mcp_cfg.get("mcpServers", {})
+    if servers:
+        lines.append(f"\n**MCP 服务 ({len(servers)}):**")
+        for name, cfg in servers.items():
+            cmd = cfg.get("command", "?")
+            args = " ".join(cfg.get("args", [])[:2])
+            lines.append(f"  • `{name}` — {cmd} {args}")
+    else:
+        lines.append("\n**MCP 服务:** (无)")
+
+    await message.answer("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
 
 
 @router.message(Command("clear"))
@@ -272,6 +302,7 @@ async def run_bot():
     # Register bot commands menu
     await bot.set_my_commands([
         BotCommand(command="model", description="切换/查看模型"),
+        BotCommand(command="tools", description="查看已加载工具"),
         BotCommand(command="clear", description="清空对话历史"),
         BotCommand(command="help", description="帮助信息"),
     ])
