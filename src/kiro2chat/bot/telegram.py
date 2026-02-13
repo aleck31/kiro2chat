@@ -34,6 +34,14 @@ session_histories: dict[SessionKey, list[dict]] = defaultdict(list)
 # Per-session locks to prevent message ordering issues
 session_locks: dict[SessionKey, asyncio.Lock] = defaultdict(asyncio.Lock)
 
+SYSTEM_PROMPT = (
+    "你是 kiro2chat 的 AI 助手，基于 Claude 模型。"
+    "请直接回答用户的问题，使用自然语言交流。"
+    "不要尝试调用任何工具或函数——你没有可用的工具。"
+    "不要输出 XML、function_calls 或任何工具调用格式。"
+    "如果被问到你有什么工具，回答你目前没有工具可用。"
+)
+
 # Curated model list for TG menu (short names only, no date aliases)
 MENU_MODELS = [
     "claude-opus-4-6",
@@ -202,7 +210,7 @@ async def handle_message(message: Message):
 
         _add_to_history(key, "user", message.text)
 
-        messages = [
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + [
             {"role": m["role"], "content": m["content"]}
             for m in session_histories[key]
         ]
