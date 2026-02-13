@@ -78,7 +78,7 @@ def create_model(
     """Create a LiteLLM model pointing at kiro2chat's API."""
     return LiteLLMModel(
         model_id=model_id,
-        client_kwargs={
+        client_args={
             "api_key": "not-needed",
             "base_url": api_base,
         },
@@ -116,6 +116,7 @@ def create_agent(
         model=model,
         system_prompt=system_prompt,
         tools=tools if tools else None,
+        callback_handler=None,  # Use stream_async() for streaming
     )
 
     return agent, mcp_clients

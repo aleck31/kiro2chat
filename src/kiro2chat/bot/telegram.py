@@ -186,32 +186,76 @@ async def handle_message(message: Message):
 
         _add_to_history(key, "user", message.text)
 
+        full_text = ""
+        tool_uses: list[dict] = []
+        chunk_count = 0
+
         try:
-            # Call agent chat endpoint (goes through Strands Agent with tools)
+            # Stream through Strands Agent
             async with httpx.AsyncClient(timeout=120) as client:
-                resp = await client.post(
+                async with client.stream(
+                    "POST",
                     f"{API_BASE}/v1/agent/chat",
-                    json={"message": message.text},
-                )
-                resp.raise_for_status()
-                result = resp.json()
+                    json={"message": message.text, "stream": True},
+                ) as resp:
+                    resp.raise_for_status()
+                    async for line in resp.aiter_lines():
+                        if not line.startswith("data: "):
+                            continue
+                        data_str = line[6:]
+                        if data_str == "[DONE]":
+                            break
 
-            content = result.get("content", "")
-            tool_uses = result.get("tool_uses", [])
+                        try:
+                            event = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
 
-            # Build display
+                        evt_type = event.get("type", "")
+
+                        if evt_type == "data":
+                            full_text += event.get("content", "")
+                            chunk_count += 1
+                            if chunk_count % EDIT_INTERVAL == 0:
+                                display = _clean_response(full_text)
+                                if display:
+                                    try:
+                                        await reply.edit_text(display[:4096] or "...")
+                                    except Exception:
+                                        pass
+
+                        elif evt_type == "tool_start":
+                            tool_uses.append({
+                                "name": event.get("name", ""),
+                                "input": event.get("input", {}),
+                            })
+                            # Show tool usage in real-time
+                            tool_line = f"🔧 Using {event.get('name', '')}..."
+                            current = _clean_response(full_text)
+                            preview = f"{current}\n\n{tool_line}" if current else tool_line
+                            try:
+                                await reply.edit_text(preview[:4096])
+                            except Exception:
+                                pass
+
+                        elif evt_type == "error":
+                            error_msg = event.get("message", "Unknown error")
+                            try:
+                                await reply.edit_text(f"❌ {error_msg}")
+                            except Exception:
+                                pass
+
+            # Build final display
             display_parts = []
-
-            clean_text = _clean_response(content)
+            clean_text = _clean_response(full_text)
             if clean_text:
                 display_parts.append(clean_text)
-
             if tool_uses:
                 display_parts.append(f"\n{_format_tool_uses(tool_uses)}")
 
             display = "\n".join(display_parts) if display_parts else "(empty response)"
 
-            _add_to_history(key, "assistant", content)
+            _add_to_history(key, "assistant", full_text)
 
             try:
                 await reply.edit_text(display[:4096])
