@@ -143,8 +143,9 @@ async def cmd_model(message: Message):
         return
 
     chosen = args[1].strip()
-    all_models = list(_get_models())
-    if chosen not in all_models:
+    # Validate against curated menu + full model map from API
+    valid = set(MENU_MODELS) | set(_get_models())
+    if chosen not in valid:
         await message.answer(f"Unknown model `{chosen}`", parse_mode=ParseMode.MARKDOWN)
         return
 
