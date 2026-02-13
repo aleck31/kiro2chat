@@ -34,8 +34,6 @@ session_locks: dict[SessionKey, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 # Curated model list for TG menu (short names only, no date aliases)
 MENU_MODELS = [
-    "claude-opus-4-6",
-    "claude-opus-4-5",
     "claude-sonnet-4-5",
     "claude-sonnet-4",
     "claude-3.7-sonnet",
