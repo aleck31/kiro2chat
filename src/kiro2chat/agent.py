@@ -12,10 +12,14 @@ from typing import Any, Generator
 from strands import Agent
 from strands.models.litellm import LiteLLMModel
 from strands.tools.mcp import MCPClient
+from strands_tools import calculator, file_read, file_write, http_request, shell
 
 logger = logging.getLogger(__name__)
 
 MCP_CONFIG_PATH = Path.home() / ".config" / "kiro2chat" / "mcp.json"
+
+# Built-in tools from strands-agents-tools
+BUILTIN_TOOLS = [calculator, file_read, file_write, http_request, shell]
 
 DEFAULT_SYSTEM_PROMPT = (
     "You are a helpful AI assistant powered by kiro2chat. "
@@ -96,7 +100,7 @@ def create_agent(
     model = create_model(api_base=api_base, model_id=model_id)
 
     mcp_clients: list[MCPClient] = []
-    tools: list[Any] = []
+    tools: list[Any] = list(BUILTIN_TOOLS)  # Start with built-in tools
 
     if load_tools:
         mcp_clients = create_mcp_clients(mcp_config)
@@ -138,6 +142,7 @@ def interactive_chat(
     print("🤖 kiro2chat Agent — Interactive Mode")
     print(f"   Model: {model_id}")
     print(f"   API: {api_base}")
+    print(f"   Built-in tools: {', '.join(t.__name__ if hasattr(t, '__name__') else str(t) for t in BUILTIN_TOOLS)}")
 
     if servers:
         print(f"   MCP Servers: {', '.join(servers.keys())}")
