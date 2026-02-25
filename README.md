@@ -2,9 +2,8 @@
 
 Kiro to Chat — 利用 Kiro CLI 的认证，将 AWS CodeWhisperer 后端的 Claude 模型封装为 OpenAI 兼容 API，并集成 Strands Agent 框架提供工具调用能力。
 
-## 版本
 
-**v0.4.0** — 版本号定义在 `src/__init__.py`，pyproject.toml 通过 hatch 动态读取。
+> ⚠️ 注意：**Kiro 后端注入的 System Prompt**，包含大量 IDE 工具定义（readFile, fsWrite, webSearch 等）。这些工具只在 Kiro IDE 内有效，通过 kiro2chat 调用时无法执行。当前用 system prompt 告知 Claude 忽略这些，但效果有限。
 
 ## 技术架构
 
@@ -33,12 +32,6 @@ Kiro to Chat — 利用 Kiro CLI 的认证，将 AWS CodeWhisperer 后端的 Cla
 │         (~/.local/share/kiro-cli/data.sqlite3)           │
 └─────────────────────────────────────────────────────────┘
 ```
-
-### ⚠️ 已知架构问题
-
-1. **自回环死锁风险**：Strands Agent 通过 LiteLLM 以 HTTP 方式回调 localhost:8000 的 `/v1/chat/completions`。当 API server 是单 worker 时会死锁。当前临时方案是 uvicorn 开 4 workers，但这不是优雅的解决方案。**更好的做法**是让 Agent 直接调用内部的 Python 函数（`CodeWhispererClient.generate_stream`），而不是走 HTTP 回环。
-
-2. **Kiro 后端注入的 System Prompt**：CodeWhisperer 会注入 Kiro IDE 的 system prompt，包含大量 IDE 工具定义（readFile, fsWrite, webSearch 等）。这些工具只在 Kiro IDE 内有效，通过 kiro2chat 调用时无法执行。当前用 system prompt 告知 Claude 忽略这些，但效果有限。
 
 ## 项目结构
 
@@ -81,24 +74,7 @@ kiro2chat/src/
 | 包管理 | uv + hatchling |
 | Python | ≥ 3.13 |
 
-## 核心模块说明
-
-### 认证链路 (`core/__init__.py` — TokenManager)
-1. 从 kiro-cli 的 SQLite 数据库读取 IdC token（key: `kirocli:odic:token`）
-2. 使用 IdC refresh token 向 `oidc.us-east-1.amazonaws.com/token` 刷新 access token
-3. 解析 profile ARN 用于 CodeWhisperer API 调用
-
-### 协议转换 (`core/converter.py`)
-- **OpenAI → CodeWhisperer**：将 OpenAI 格式的 messages/tools 转换为 CW 的 `generateAssistantResponse` 请求格式
-- System message → 注入为 history 中的首轮对话
-- Tool definitions → `toolSpecification` 格式
-- Tool role messages → `toolResults` in `userInputMessageContext`
-- `chatTriggerType` 固定为 `MANUAL`（CW 不接受 `AUTO`）
-
-### EventStream 解析 (`core/eventstream.py`)
-- 解析 AWS EventStream 二进制协议
-- 支持流式和非流式解析
-- 处理 `assistantResponseEvent`、`toolUse`、`exception` 等事件类型
+## 应用模块说明
 
 ### API 路由 (`api/routes.py`)
 - `GET /v1/models` — 列出可用模型
@@ -136,17 +112,6 @@ kiro2chat/src/
 - MCP 配置直接读取 `~/.kiro/settings/mcp.json`
 - 统计收集器 (`stats.py`)：线程安全，deque 最近 100 条记录
 
-## 模型映射
-
-| OpenAI 名称 | CodeWhisperer ID | 状态 |
-|---|---|---|
-| claude-sonnet-4-5 | CLAUDE_SONNET_4_5_20250929_V1_0 | ✅ 已验证 |
-| claude-sonnet-4 | CLAUDE_SONNET_4_20250514_V1_0 | ✅ 已验证 |
-| claude-3.7-sonnet | CLAUDE_3_7_SONNET_20250219_V1_0 | ✅ 已验证 |
-| claude-haiku-4-5 | auto | ⚠️ 未充分测试 |
-
-参考实现：`~/repos/kiro2api/config/config.go`（Go 版本的模型映射表）
-
 ## 快速开始
 
 ```bash
@@ -177,11 +142,6 @@ uv run kiro2chat all       # 全部一起启动
 
 - **系统配置**：`~/.config/kiro2chat/config.toml`（可通过 Web UI 编辑）
 - **MCP 工具**：`~/.kiro/settings/mcp.json`（复用 Kiro CLI 配置）
-
-## 参考实现
-
-- **kiro2api**（Go）：`~/repos/kiro2api/` — 更成熟的 Go 实现，有完整的 tool lifecycle 管理、SSE 合规校验、Sonic JSON 聚合器
-- **kiro2cc**：另一个逆向 Kiro 认证的项目
 
 ## Changelog
 
