@@ -1,4 +1,4 @@
-"""AWS EventStream parser for CodeWhisperer responses."""
+"""AWS EventStream parser for Kiro responses."""
 
 import json
 import struct
@@ -133,7 +133,7 @@ def extract_content_from_events(
 
         elif msg.event_type == "exception":
             error_msg = msg.payload.get("message", str(msg.payload))
-            raise RuntimeError(f"CodeWhisperer error: {error_msg}")
+            raise RuntimeError(f"Kiro error: {error_msg}")
 
     return "".join(text_parts), tool_uses if tool_uses else None
 

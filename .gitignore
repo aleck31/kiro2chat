@@ -3,6 +3,8 @@ __pycache__/
 .venv/
 *.egg-info/
 .claude
+.kiro
+devguide
 dist/
 build/
 .env

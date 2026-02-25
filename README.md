@@ -1,6 +1,6 @@
 # kiro2chat
 
-Kiro to Chat — 利用 Kiro CLI 的认证，将 AWS CodeWhisperer 后端的 Claude 模型封装为 OpenAI 兼容 API，并集成 Strands Agent 框架提供工具调用能力。
+Kiro to Chat — 利用 Kiro CLI 的认证，将 AWS Kiro/CodeWhisperer 后端的 Claude 模型封装为 OpenAI 兼容 API，并集成 Strands Agent 框架提供工具调用能力。
 
 
 > ⚠️ 注意：**Kiro 后端注入的 System Prompt**，包含大量 IDE 工具定义（readFile, fsWrite, webSearch 等）。这些工具只在 Kiro IDE 内有效，通过 kiro2chat 调用时无法执行。当前用 system prompt 告知 Claude 忽略这些，但效果有限。
@@ -10,27 +10,26 @@ Kiro to Chat — 利用 Kiro CLI 的认证，将 AWS CodeWhisperer 后端的 Cla
 ### 整体架构
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                       客户端层                            │
-│  TG Bot ─┐                                              │
-│  WebUI  ─┤─→ /v1/agent/chat ─→ Strands Agent           │
-│  CLI    ─┘                      (built-in + MCP tools)  │
-│                                       │                  │
-│                                       ↓                │
-│                              /v1/chat/completions        │
-│                                       │                  │
-├───────────────────────────────────────┼──────────────────┤
-│                    协议转换层          │                  │
-│              OpenAI → CodeWhisperer   │                  │
-│              (converter.py)           │                  │
-│                                       ↓                  │
-│              EventStream 解析 ← CodeWhisperer API        │
-│              (eventstream.py)                            │
-├─────────────────────────────────────────────────────────┤
-│                     认证层                               │
-│         kiro-cli SQLite → IdC Token Refresh              │
-│         (~/.local/share/kiro-cli/data.sqlite3)           │
-└─────────────────────────────────────────────────────────┘
+curl / OpenWebUI / Cursor          TG Bot / WebUI
+         │                                │
+         │ OpenAI 格式                     │
+         ▼                                ▼
+  /v1/chat/completions          /v1/agent/chat
+         ▲                                │
+         │ OpenAI 格式（自回环）            ▼
+         └──────────────── Strands Agent
+                           (built-in + MCP tools)
+         │
+         ▼
+  OpenAI → Kiro 协议转换
+  (converter.py)
+         │
+         ▼
+  Kiro/CodeWhisperer API
+  (EventStream 解析)
+         │
+         ▼
+  kiro-cli SQLite → IdC Token
 ```
 
 ## 项目结构
@@ -47,8 +46,8 @@ kiro2chat/src/
 ├── agent.py              # Strands Agent 创建、MCP 工具加载
 ├── core/
 │   ├── __init__.py       # TokenManager 导出
-│   ├── client.py         # CodeWhisperer API 客户端 (httpx async)
-│   ├── converter.py      # OpenAI ↔ CodeWhisperer 协议转换
+│   ├── client.py         # Kiro API 客户端 (httpx async)
+│   ├── converter.py      # OpenAI ↔ Kiro 协议转换
 │   └── eventstream.py    # AWS EventStream 二进制协议解析
 ├── api/
 │   ├── __init__.py
@@ -63,10 +62,10 @@ kiro2chat/src/
 
 | 组件 | 技术 |
 |------|------|
-| Web 框架 | FastAPI + Uvicorn (4 workers) |
+| Web 框架 | FastAPI + Uvicorn (async) |
 | HTTP 客户端 | httpx (async) |
 | AI Agent | Strands Agents SDK |
-| LLM Provider | LiteLLM → kiro2chat API (OpenAI 兼容) |
+| LLM Provider | strands OpenAIModel → kiro2chat API (OpenAI 兼容) |
 | Web UI | Gradio 6 (Navbar 多页面) |
 | Telegram Bot | aiogram 3 |
 | 配置管理 | python-dotenv + TOML (tomllib/tomli-w) |
@@ -88,7 +87,7 @@ kiro2chat/src/
 - `POST /v1/agent/reload` — 重新加载 MCP 工具
 
 ### Agent (`agent.py`)
-- 创建 Strands Agent，使用 LiteLLM 指向 localhost:8000 的 OpenAI 兼容 API
+- 创建 Strands Agent，使用 OpenAIModel 回调 localhost:8000 的 OpenAI 兼容 API（自回环）
 - 内置工具：calculator, file_read, file_write, http_request, shell
 - MCP 工具从 `~/.kiro/settings/mcp.json` 加载（复用 Kiro CLI 配置）
 - System prompt 引导 Agent 基于 tool spec 自主判断可用工具
@@ -102,7 +101,7 @@ kiro2chat/src/
 - 最大历史 20 条消息
 
 ### Web UI (`webui.py`)
-- **聊天页**：模型选择 + 工具列表 + ChatInterface（直接调 /v1/chat/completions）
+- **聊天页**：模型选择 + 工具列表 + ChatInterface（通过 /v1/agent/chat 调用 Strands Agent）
 - **系统配置页**：可视化编辑所有配置项，保存到 `~/.config/kiro2chat/config.toml`
 - **监控面板**：请求统计、延迟、错误率、最近请求日志（5s 自动刷新）
 - **Agent 页**：通过 Strands Agent 聊天 + MCP 配置编辑
@@ -119,7 +118,7 @@ kiro2chat/src/
 cd ~/repos/kiro2chat
 uv sync
 
-uv run kiro2chat api      # API server (端口 8000, 4 workers)
+uv run kiro2chat api      # API server (端口 8000, 单 worker)
 uv run kiro2chat webui     # Web UI (端口 7860)
 uv run kiro2chat bot       # Telegram Bot
 uv run kiro2chat all       # 全部一起启动
@@ -145,8 +144,19 @@ uv run kiro2chat all       # 全部一起启动
 
 ## Changelog
 
+### v0.5.0
+- 修复 Agent 自回环死锁：非流式路径改用 `await invoke_async()`，移除多 worker
+- Agent /chat 支持 per-request 切换模型
+- 统一 MCP 配置源为 `~/.kiro/settings/mcp.json`，修复 webui 标注错误
+- 跳过 http/sse 类型 MCP server（不再崩溃）
+- 修复 `mcp.client.stdio` 与 gradio 的循环导入死锁
+- Telegram bot 模型列表改为从 `/v1/models` 动态获取
+- 精简 Kiro 请求日志（摘要替代全量 body）
+- 补全 model_map 验证状态，修正 sonnet-4-6 ID（`claude-sonnet-4.6`）
+- 新增 `devguide/ARCHITECTURE.md` 架构设计文档
+
 ### v0.4.0
-- Strands Agent 集成（LiteLLM + MCP 工具）
+- Strands Agent 集成（OpenAIModel 自回环 + MCP 工具）
 - Agent API endpoints（/v1/agent/chat 流式 + 非流式）
 - TG Bot 改为通过 Agent 层调用
 - 内置工具：calculator, file_read, file_write, http_request, shell
@@ -154,7 +164,7 @@ uv run kiro2chat all       # 全部一起启动
 
 ### v0.3.0
 - OpenAI 兼容 API 完整 tool_calls 支持（流式 + 非流式）
-- tool role 消息回传 CodeWhisperer
+- tool role 消息回传 Kiro
 
 ### v0.2.0
 - Gradio 多页面 Web UI (Navbar)

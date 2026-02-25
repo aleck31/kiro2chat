@@ -8,11 +8,11 @@ import json
 import logging
 from pathlib import Path
 from typing import Any
-from mcp.client.stdio import StdioServerParameters, stdio_client
 from strands import Agent
 from strands.models.openai import OpenAIModel
 from strands.tools.mcp import MCPClient
 from strands_tools import calculator, file_read, file_write, http_request, shell
+from .config import config as _config
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ MCP_CONFIG_PATH = Path.home() / ".config" / "kiro2chat" / "mcp.json"
 BUILTIN_TOOLS = [calculator, file_read, file_write, http_request, shell]
 
 DEFAULT_SYSTEM_PROMPT = """\
-You are kiro2chat, an AI assistant powered by Claude via Kiro/CodeWhisperer.
+You are kiro2chat, an AI assistant powered by Claude via Kiro/CW.
 
 You have real tools at your disposal — check your tool specifications to see what's available, and use them proactively when they'd help.
 
@@ -59,6 +59,8 @@ def save_mcp_config(config: dict[str, Any]) -> None:
 
 def create_mcp_clients(mcp_config: dict[str, Any] | None = None) -> list[MCPClient]:
     """Create MCPClient instances from config."""
+    from mcp.client.stdio import StdioServerParameters, stdio_client  # lazy to avoid circular import with gradio
+
     if mcp_config is None:
         mcp_config = load_mcp_config()
 
@@ -93,7 +95,7 @@ def create_mcp_clients(mcp_config: dict[str, Any] | None = None) -> list[MCPClie
 
 def create_model(
     api_base: str = "http://localhost:8000/v1",
-    model_id: str = "claude-sonnet-4-20250514",
+    model_id: str = _config.default_model,
 ) -> OpenAIModel:
     """Create an OpenAI-compatible model pointing at kiro2chat's API."""
     return OpenAIModel(
@@ -108,7 +110,7 @@ def create_model(
 def create_agent(
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
     api_base: str = "http://localhost:8000/v1",
-    model_id: str = "claude-sonnet-4-20250514",
+    model_id: str = _config.default_model,
     mcp_config: dict[str, Any] | None = None,
     load_tools: bool = True,
 ) -> tuple[Agent, list[MCPClient]]:

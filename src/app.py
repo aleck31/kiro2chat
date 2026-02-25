@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from . import __version__
 from .config import config
 from .core import TokenManager
-from .core.client import CodeWhispererClient
+from .core.client import KiroClient
 from .api.routes import router, init_services
 from .api.agent_routes import router as agent_router, init_agent_routes
 
@@ -27,8 +27,8 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan: init and cleanup."""
     tm = TokenManager()
-    cw = CodeWhispererClient()
-    init_services(tm, cw)
+    kiro = KiroClient()
+    init_services(tm, kiro)
 
     try:
         token = await tm.get_access_token()
@@ -40,7 +40,8 @@ async def lifespan(app: FastAPI):
     # Initialize Strands Agent
     mcp_clients = []
     try:
-        from .agent import create_agent, load_mcp_config
+        from .agent import create_agent
+        from .config_manager import load_mcp_config
         mcp_config = load_mcp_config()
         agent, mcp_clients = create_agent(mcp_config=mcp_config)
         init_agent_routes(agent, mcp_clients, mcp_config)
@@ -57,7 +58,7 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass
     await tm.close()
-    await cw.close()
+    await kiro.close()
 
 
 app = FastAPI(

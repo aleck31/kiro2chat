@@ -20,8 +20,8 @@ def _load_toml_defaults() -> dict:
 _file_cfg = _load_toml_defaults()
 
 
-def _get(key: str, env_key: str | None = None, default: str | None = None) -> str | None:
-    """Get config value: env var > toml file > default."""
+def _get(key: str, env_key: str | None = None) -> str | None:
+    """Get config value: env var > toml file."""
     env = env_key or key.upper()
     val = os.getenv(env)
     if val is not None:
@@ -29,57 +29,56 @@ def _get(key: str, env_key: str | None = None, default: str | None = None) -> st
     val = _file_cfg.get(key)
     if val is not None:
         return str(val)
-    return default
+    return None
 
 
 @dataclass
 class Config:
-    port: int = int(_get("port", "PORT", "8000"))
-    host: str = _get("host", "HOST", "0.0.0.0")
+    port: int = int(_get("port", "PORT") or "8000")
+    host: str = _get("host", "HOST") or "0.0.0.0"
     api_key: str | None = _get("api_key", "API_KEY")
-    log_level: str = _get("log_level", "LOG_LEVEL", "info")
+    log_level: str = _get("log_level", "LOG_LEVEL") or "info"
 
     # kiro-cli SQLite database path
-    kiro_db_path: str = _get(
-        "kiro_db_path",
-        "KIRO_DB_PATH",
-        str(Path.home() / ".local/share/kiro-cli/data.sqlite3"),
+    kiro_db_path: str = (
+        _get("kiro_db_path", "KIRO_DB_PATH")
+        or str(Path.home() / ".local/share/kiro-cli/data.sqlite3")
     )
 
     # Telegram bot
     tg_bot_token: str | None = _get("tg_bot_token", "TG_BOT_TOKEN")
 
     # AWS endpoints
-    idc_refresh_url: str = _get(
-        "idc_refresh_url", "IDC_REFRESH_URL",
-        "https://oidc.us-east-1.amazonaws.com/token",
+    idc_refresh_url: str = (
+        _get("idc_refresh_url", "IDC_REFRESH_URL")
+        or "https://oidc.us-east-1.amazonaws.com/token"
     )
-    codewhisperer_url: str = _get(
-        "codewhisperer_url", "CODEWHISPERER_URL",
-        "https://codewhisperer.us-east-1.amazonaws.com/generateAssistantResponse",
+    codewhisperer_url: str = (
+        _get("codewhisperer_url", "CODEWHISPERER_URL")
+        or "https://codewhisperer.us-east-1.amazonaws.com/generateAssistantResponse"
     )
 
-    # CodeWhisperer profile ARN (read from kiro-cli state)
+    # Kiro profile ARN (read from kiro-cli state)
     profile_arn: str = os.getenv("PROFILE_ARN", "")
 
-    # Model mapping: OpenAI model name -> CodeWhisperer model ID
+    # Model mapping: OpenAI model name -> Kiro model ID
     model_map: dict[str, str] = field(default_factory=lambda: {
+        # Opus 4.6
+        "claude-opus-4-6 (Krio)": "claude-opus-4.6",
+        # Sonnet 4.6
+        "claude-sonnet-4-6 (Krio)": "claude-sonnet-4.6",
+        # Opus 4.5
+        "claude-opus-4-5 (Krio)": "claude-opus-4.5",
         # Sonnet 4.5
-        "claude-sonnet-4-5": "CLAUDE_SONNET_4_5_20250929_V1_0",
-        "claude-sonnet-4-5-20250929": "CLAUDE_SONNET_4_5_20250929_V1_0",
-        # Sonnet 4
-        "claude-sonnet-4": "CLAUDE_SONNET_4_20250514_V1_0",
-        "claude-sonnet-4-20250514": "CLAUDE_SONNET_4_20250514_V1_0",
-        # Sonnet 3.7
-        "claude-3.7-sonnet": "CLAUDE_3_7_SONNET_20250219_V1_0",
-        "claude-3-7-sonnet-20250219": "CLAUDE_3_7_SONNET_20250219_V1_0",
+        "claude-sonnet-4-5 (Krio)": "CLAUDE_SONNET_4_5_20250929_V1_0",
         # Haiku 4.5
-        "claude-haiku-4-5": "auto",
-        "claude-3-5-haiku-20241022": "auto",
+        "claude-haiku-4-5 (Krio)": "claude-haiku-4.5",
+        # Sonnet 4
+        "claude-sonnet-4 (Krio)": "CLAUDE_SONNET_4_20250514_V1_0"
     })
 
     # Default model when client doesn't specify
-    default_model: str = _get("default_model", "DEFAULT_MODEL", "claude-sonnet-4-5")
+    default_model: str = _get("default_model", "DEFAULT_MODEL") or "claude-sonnet-4-5"
 
 
 config = Config()

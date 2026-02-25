@@ -1,4 +1,4 @@
-"""CodeWhisperer API client."""
+"""Kiro API client."""
 
 import logging
 from typing import AsyncIterator
@@ -12,8 +12,8 @@ from .eventstream import EventStreamMessage, parse_streaming_eventstream
 logger = logging.getLogger(__name__)
 
 
-class CodeWhispererClient:
-    """Async client for CodeWhisperer generateAssistantResponse API."""
+class KiroClient:
+    """Async client for Kiro generateAssistantResponse API."""
 
     def __init__(self):
         self._http = httpx.AsyncClient(
@@ -29,8 +29,8 @@ class CodeWhispererClient:
         tools: list[dict] | None = None,
         conversation_id: str | None = None,
     ) -> AsyncIterator[EventStreamMessage]:
-        """Send request to CodeWhisperer and yield streaming EventStream messages."""
-        cw_req = openai_to_codewhisperer(
+        """Send request to Kiro and yield streaming EventStream messages."""
+        kiro_req = openai_to_codewhisperer(
             messages=messages,
             model=model,
             tools=tools,
@@ -38,13 +38,21 @@ class CodeWhispererClient:
             conversation_id=conversation_id,
         )
 
-        import json as _json
-        logger.info(f"📤 CW request: {_json.dumps(cw_req, ensure_ascii=False)[:2000]}")
+        _cs = kiro_req.get("conversationState", {})
+        _cur = _cs.get("currentMessage", {}).get("userInputMessage", {})
+        _tools = _cur.get("userInputMessageContext", {}).get("tools", [])
+        _tool_names = [t.get("toolSpecification", {}).get("name") for t in _tools]
+        logger.info(
+            f"📤 Kiro request: model={_cur.get('modelId')}, "
+            f"tools={len(_tools)}{_tool_names}, "
+            f"history={len(_cs.get('history', []))}, "
+            f"content={_cur.get('content', '')[:80]!r}"
+        )
 
         async with self._http.stream(
             "POST",
             config.codewhisperer_url,
-            json=cw_req,
+            json=kiro_req,
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {access_token}",
@@ -54,7 +62,7 @@ class CodeWhispererClient:
             if response.status_code != 200:
                 body = await response.aread()
                 raise RuntimeError(
-                    f"CodeWhisperer API error: {response.status_code} {body.decode('utf-8', errors='replace')[:500]}"
+                    f"Kiro API error: {response.status_code} {body.decode('utf-8', errors='replace')[:500]}"
                 )
             async for msg in parse_streaming_eventstream(response):
                 yield msg

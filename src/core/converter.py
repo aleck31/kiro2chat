@@ -1,4 +1,4 @@
-"""Protocol converter: OpenAI ↔ CodeWhisperer."""
+"""Protocol converter: OpenAI ↔ Kiro."""
 
 import json
 import uuid
@@ -17,13 +17,13 @@ def openai_to_codewhisperer(
     profile_arn: str = "",
     conversation_id: str | None = None,
 ) -> dict:
-    """Convert OpenAI ChatCompletion request to CodeWhisperer format.
+    """Convert OpenAI ChatCompletion request to Kiro format.
 
     Handles system, user, assistant, and tool role messages.
-    Tool results (role="tool") are converted to CW toolResults format.
+    Tool results (role="tool") are converted to Kiro toolResults format.
     """
-    cw_model = config.model_map.get(model)
-    if not cw_model:
+    kiro_model = config.model_map.get(model)
+    if not kiro_model:
         raise ValueError(f"Unknown model: {model}. Available: {list(config.model_map.keys())}")
 
     conv_id = conversation_id or str(uuid.uuid4())
@@ -48,14 +48,14 @@ def openai_to_codewhisperer(
             conv_messages.append(msg)
 
     # Build tool definitions
-    cw_tools: list[dict] = []
+    kiro_tools: list[dict] = []
     if tools:
         for tool in tools:
             fn = tool.get("function", tool)
             name = fn.get("name", "")
             if not name or name in ("web_search", "websearch"):
                 continue
-            cw_tools.append({
+            kiro_tools.append({
                 "toolSpecification": {
                     "name": name,
                     "description": fn.get("description", "")[:10000],
@@ -73,7 +73,7 @@ def openai_to_codewhisperer(
         history.append({
             "userInputMessage": {
                 "content": "\n".join(system_parts),
-                "modelId": cw_model,
+                "modelId": kiro_model,
                 "origin": "AI_EDITOR",
             }
         })
@@ -87,7 +87,7 @@ def openai_to_codewhisperer(
     # Process conversation history
     # We need to pair user+tool messages with assistant messages
     # OpenAI format: user -> assistant (with tool_calls) -> tool (results) -> assistant -> ...
-    # CW format: userInputMessage (with toolResults) <-> assistantResponseMessage (with toolUses)
+    # Kiro format: userInputMessage (with toolResults) <-> assistantResponseMessage (with toolUses)
 
     user_buffer: list[dict] = []  # Buffer of user/tool messages
 
@@ -101,7 +101,7 @@ def openai_to_codewhisperer(
             user_buffer.append(msg)
         elif role == "assistant":
             if user_buffer:
-                user_msg = _build_history_user_message(user_buffer, cw_model)
+                user_msg = _build_history_user_message(user_buffer, kiro_model)
                 history.append(user_msg)
                 user_buffer = []
 
@@ -110,7 +110,7 @@ def openai_to_codewhisperer(
 
     # Handle remaining buffered user/tool messages
     if user_buffer:
-        user_msg = _build_history_user_message(user_buffer, cw_model)
+        user_msg = _build_history_user_message(user_buffer, kiro_model)
         history.append(user_msg)
         history.append({
             "assistantResponseMessage": {
@@ -142,24 +142,24 @@ def openai_to_codewhisperer(
         current_content = ""
         current_user_msg_context: dict[str, Any] = {
             "toolResults": tool_results,
-            "tools": cw_tools,
+            "tools": kiro_tools,
         }
     else:
         current_content = _extract_text(last_msg.get("content", "Hello"))
         current_user_msg_context = {
             "toolResults": [],
-            "tools": cw_tools,
+            "tools": kiro_tools,
         }
 
     # Build the request
-    cw_req: dict[str, Any] = {
+    kiro_req: dict[str, Any] = {
         "conversationState": {
             "chatTriggerType": "MANUAL",
             "conversationId": conv_id,
             "currentMessage": {
                 "userInputMessage": {
                     "content": current_content,
-                    "modelId": cw_model,
+                    "modelId": kiro_model,
                     "origin": "AI_EDITOR",
                     "userInputMessageContext": current_user_msg_context,
                     "images": [],
@@ -170,13 +170,13 @@ def openai_to_codewhisperer(
     }
 
     if profile_arn:
-        cw_req["profileArn"] = profile_arn
+        kiro_req["profileArn"] = profile_arn
 
-    return cw_req
+    return kiro_req
 
 
-def _build_history_user_message(msgs: list[dict], cw_model: str) -> dict:
-    """Build a CW history userInputMessage from a list of user/tool messages.
+def _build_history_user_message(msgs: list[dict], kiro_model: str) -> dict:
+    """Build a Kiro history userInputMessage from a list of user/tool messages.
 
     Groups text content from user messages and tool results from tool messages.
     """
@@ -193,7 +193,7 @@ def _build_history_user_message(msgs: list[dict], cw_model: str) -> dict:
     result: dict[str, Any] = {
         "userInputMessage": {
             "content": "\n".join(text_parts) if text_parts else "",
-            "modelId": cw_model,
+            "modelId": kiro_model,
             "origin": "AI_EDITOR",
         }
     }
@@ -209,7 +209,7 @@ def _build_history_user_message(msgs: list[dict], cw_model: str) -> dict:
 
 
 def _build_history_assistant_message(msg: dict) -> dict:
-    """Build a CW history assistantResponseMessage from an OpenAI assistant message."""
+    """Build a Kiro history assistantResponseMessage from an OpenAI assistant message."""
     content = _extract_text(msg.get("content", ""))
     tool_uses = _extract_tool_uses_from_assistant(msg)
 
@@ -222,10 +222,10 @@ def _build_history_assistant_message(msg: dict) -> dict:
 
 
 def _convert_tool_message_to_result(msg: dict) -> dict:
-    """Convert an OpenAI tool message (role="tool") to CW toolResult format.
+    """Convert an OpenAI tool message (role="tool") to Kiro toolResult format.
 
     OpenAI format: {"role": "tool", "tool_call_id": "xxx", "content": "result text"}
-    CW format: {"toolUseId": "xxx", "content": [{"text": "result text"}], "status": "success"}
+    Kiro format: {"toolUseId": "xxx", "content": [{"text": "result text"}], "status": "success"}
     """
     tool_call_id = msg.get("tool_call_id", "")
     content = msg.get("content", "")
@@ -256,10 +256,10 @@ def _extract_tool_results_from_messages(msgs: list[dict]) -> list[dict]:
 
 
 def _extract_tool_uses_from_assistant(msg: dict) -> list[dict] | None:
-    """Extract tool_calls from an OpenAI assistant message into CW toolUses format.
+    """Extract tool_calls from an OpenAI assistant message into Kiro toolUses format.
 
     OpenAI format: {"tool_calls": [{"id": "x", "function": {"name": "n", "arguments": "{...}"}}]}
-    CW format: [{"toolUseId": "x", "name": "n", "input": {...}}]
+    Kiro format: [{"toolUseId": "x", "name": "n", "input": {...}}]
     """
     tool_calls = msg.get("tool_calls", [])
     if not tool_calls:

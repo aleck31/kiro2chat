@@ -340,7 +340,7 @@ def create_ui() -> gr.Blocks:
             with gr.Row():
                 gr.Markdown("### ☁️ AWS 端点")
                 cfg_idc_url = gr.Textbox(label="idc_refresh_url", value=defaults[6])
-                cfg_cw_url = gr.Textbox(label="codewhisperer_url", value=defaults[7])
+                cfg_kiro_url = gr.Textbox(label="codewhisperer_url", value=defaults[7])
 
             with gr.Row():
                 gr.Markdown("### 🤖 Telegram Bot")
@@ -357,7 +357,7 @@ def create_ui() -> gr.Blocks:
                 fn=save_config,
                 inputs=[
                     cfg_host, cfg_port, cfg_log_level, cfg_api_key, cfg_kiro_db,
-                    cfg_tg_token, cfg_idc_url, cfg_cw_url,
+                    cfg_tg_token, cfg_idc_url, cfg_kiro_url,
                     cfg_default_model, cfg_model_map,
                 ],
                 outputs=[save_status],
@@ -365,7 +365,7 @@ def create_ui() -> gr.Blocks:
 
         with gr.Tab(id='mcp', label='MCP Config'):
             # MCP Config Section
-            gr.Markdown("---\n### 🔧 MCP Servers 配置\n编辑 `~/.config/kiro2chat/mcp.json`")
+            gr.Markdown("### 🔧 MCP Servers 配置\n编辑 `~/.kiro/settings/mcp.json`")
 
             def load_mcp_json():
                 cfg = load_mcp_config()

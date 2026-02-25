@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 
 from ..config import config
 from ..core import TokenManager
-from ..core.client import CodeWhispererClient
+from ..core.client import KiroClient
 from ..stats import stats
 
 logger = logging.getLogger(__name__)
@@ -20,13 +20,13 @@ router = APIRouter(prefix="/v1")
 
 # Shared instances (initialized in app lifespan)
 token_manager: TokenManager | None = None
-cw_client: CodeWhispererClient | None = None
+kiro_client: KiroClient | None = None
 
 
-def init_services(tm: TokenManager, cw: CodeWhispererClient):
-    global token_manager, cw_client
+def init_services(tm: TokenManager, kiro: KiroClient):
+    global token_manager, kiro_client
     token_manager = tm
-    cw_client = cw
+    kiro_client = kiro
 
 
 def _check_auth(authorization: str | None = None, x_api_key: str | None = None):
@@ -158,7 +158,7 @@ async def _stream_response(
     tool_call_index = 0
 
     try:
-        async for event in cw_client.generate_stream(
+        async for event in kiro_client.generate_stream(
             access_token=access_token,
             messages=messages,
             model=model,
@@ -171,7 +171,7 @@ async def _stream_response(
                     yield _make_chunk(chat_id, created, model, {"content": content})
 
             elif event.event_type == "toolUse":
-                # CodeWhisperer toolUse event -> OpenAI tool_calls chunk
+                # Kiro toolUse event -> OpenAI tool_calls chunk
                 payload = event.payload
                 tool_use_id = payload.get("toolUseId", f"call_{uuid.uuid4().hex[:24]}")
                 tool_name = payload.get("name", "")
@@ -228,7 +228,7 @@ async def _non_stream_response(
     tool_calls: list[dict] = []
     tool_call_index = 0
 
-    async for event in cw_client.generate_stream(
+    async for event in kiro_client.generate_stream(
         access_token=access_token,
         messages=messages,
         model=model,
@@ -256,7 +256,7 @@ async def _non_stream_response(
 
         elif event.event_type == "exception":
             error_msg = event.payload.get("message", str(event.payload))
-            raise HTTPException(status_code=502, detail=f"CodeWhisperer error: {error_msg}")
+            raise HTTPException(status_code=502, detail=f"Kiro error: {error_msg}")
 
     full_text = "".join(text_parts)
     finish_reason = "tool_calls" if tool_calls else "stop"

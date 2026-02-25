@@ -144,9 +144,14 @@ async def agent_chat(request: Request):
     body = await request.json()
     message = body.get("message", "")
     stream = body.get("stream", False)
+    model_id = body.get("model")
 
     if not message:
         raise HTTPException(status_code=400, detail="message is required")
+
+    if model_id:
+        from ..agent import create_model
+        _agent.model = create_model(model_id=model_id)
 
     if stream:
         return StreamingResponse(

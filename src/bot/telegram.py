@@ -32,15 +32,6 @@ session_histories: dict[SessionKey, list[dict]] = defaultdict(list)
 # Per-session locks to prevent message ordering issues
 session_locks: dict[SessionKey, asyncio.Lock] = defaultdict(asyncio.Lock)
 
-# Curated model list for TG menu (short names only, no date aliases)
-MENU_MODELS = [
-    "claude-sonnet-4-5",
-    "claude-sonnet-4",
-    "claude-3.7-sonnet",
-    "claude-haiku-4-5",
-]
-
-
 def _session_key(message: Message) -> SessionKey:
     """Get session key: (chat_id, user_id) for group isolation."""
     return (message.chat.id, message.from_user.id)
@@ -150,7 +141,8 @@ async def cmd_model(message: Message):
 
     if len(args) < 2:
         current = session_models.get(key, "claude-sonnet-4-5")
-        model_list = "\n".join(f"• `{m}`" for m in MENU_MODELS)
+        models = _get_models()
+        model_list = "\n".join(f"• `{m}`" for m in models)
         await message.answer(
             f"Current model: `{current}`\n\nAvailable:\n{model_list}\n\n"
             f"Set with: `/model <name>`",
@@ -159,8 +151,7 @@ async def cmd_model(message: Message):
         return
 
     chosen = args[1].strip()
-    valid = set(MENU_MODELS) | set(_get_models())
-    if chosen not in valid:
+    if chosen not in set(_get_models()):
         await message.answer(f"Unknown model `{chosen}`", parse_mode=ParseMode.MARKDOWN)
         return
 
