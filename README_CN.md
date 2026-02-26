@@ -9,7 +9,7 @@
   ![Python](https://img.shields.io/badge/python-≥3.13-blue?logo=python&logoColor=white)
   ![FastAPI](https://img.shields.io/badge/FastAPI-0.129+-green?logo=fastapi&logoColor=white)
   ![License](https://img.shields.io/badge/license-MIT-blue)
-  ![Version](https://img.shields.io/badge/version-0.7.0-purple)
+  ![Version](https://img.shields.io/badge/version-0.8.0-purple)
 </div>
 
 ---
@@ -272,6 +272,20 @@ kiro2chat/src/
 ```
 
 ## 📝 更新日志
+
+### v0.8.0 — 精确 Token 计数 & Nginx 优化 (2026-02-26)
+
+#### 📊 精确 Token 计数
+- 用 **tiktoken cl100k_base** 编码替代字符估算
+- 中文文本精度从 ±48% 误差提升到**精确匹配**
+- 所有 token 计数现在与 OpenAI tokenizer 完全一致
+- tiktoken 不可用时优雅降级到字符估算
+
+#### 🔧 Nginx 优化
+- `proxy_read_timeout` / `proxy_send_timeout`：300s → **7200s**（支持长输出 2 小时）
+- `proxy_http_version`：添加 **1.1**（SSE 流式必需）
+- `proxy_connect_timeout`：添加 **60s**
+- `chunked_transfer_encoding`：**on**，`proxy_cache`：**off**
 
 ### v0.7.0 — 图片支持 & 生产部署 (2026-02-26)
 

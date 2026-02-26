@@ -9,7 +9,7 @@
   ![Python](https://img.shields.io/badge/python-≥3.13-blue?logo=python&logoColor=white)
   ![FastAPI](https://img.shields.io/badge/FastAPI-0.129+-green?logo=fastapi&logoColor=white)
   ![License](https://img.shields.io/badge/license-MIT-blue)
-  ![Version](https://img.shields.io/badge/version-0.7.0-purple)
+  ![Version](https://img.shields.io/badge/version-0.8.0-purple)
 </div>
 
 ---
@@ -280,6 +280,20 @@ kiro2chat/src/
 | Python | ≥ 3.13 |
 
 ## 📝 Changelog
+
+### v0.8.0 — Accurate Token Counting & Nginx Optimization (2026-02-26)
+
+#### 📊 Accurate Token Counting
+- Replaced character-based heuristic with **tiktoken cl100k_base** encoding
+- Chinese text accuracy improved from ±48% error to **exact match**
+- All token counts now match OpenAI's tokenizer precisely
+- Graceful fallback to heuristic if tiktoken unavailable
+
+#### 🔧 Nginx Optimization
+- `proxy_read_timeout` / `proxy_send_timeout`: 300s → **7200s** (2 hours for long outputs)
+- `proxy_http_version`: added **1.1** (required for SSE streaming)
+- `proxy_connect_timeout`: added **60s**
+- `chunked_transfer_encoding`: **on**, `proxy_cache`: **off**
 
 ### v0.7.0 — Image Support & Production Deployment (2026-02-26)
 
