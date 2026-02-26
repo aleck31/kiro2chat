@@ -24,6 +24,7 @@ from ..config import config
 from ..core import TokenManager
 from ..core.client import CodeWhispererClient
 from ..core.sanitizer import sanitize_text, KIRO_BUILTIN_TOOLS
+from ..core.token_counter import estimate_tokens, estimate_messages_tokens
 from ..stats import stats
 
 logger = logging.getLogger(__name__)
@@ -261,11 +262,18 @@ async def anthropic_messages(
     stop_reason = "tool_use" if any(b["type"] == "tool_use" for b in content_blocks) else "end_turn"
     stats.record(model=model, latency_ms=(time.time() - t0) * 1000, status="ok")
 
+    # Token estimation
+    input_tokens = estimate_messages_tokens(messages)
+    output_tokens = estimate_tokens(full_text or "")
+    for b in content_blocks:
+        if b["type"] == "tool_use":
+            output_tokens += estimate_tokens(b["name"]) + estimate_tokens(str(b["input"]))
+
     return JSONResponse({
         "id": msg_id, "type": "message", "role": "assistant", "model": model,
         "content": content_blocks,
         "stop_reason": stop_reason, "stop_sequence": None,
-        "usage": {"input_tokens": 0, "output_tokens": 0},
+        "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
     })
 
 
@@ -274,13 +282,14 @@ async def _stream_anthropic(
     tools: list[dict] | None, t0: float,
 ) -> AsyncIterator[str]:
     msg_id = _gen_msg_id()
+    input_tokens = estimate_messages_tokens(messages)
 
     yield _sse("message_start", {
         "type": "message_start",
         "message": {
             "id": msg_id, "type": "message", "role": "assistant", "model": model,
             "content": [], "stop_reason": None, "stop_sequence": None,
-            "usage": {"input_tokens": 0, "output_tokens": 0},
+            "usage": {"input_tokens": input_tokens, "output_tokens": 0},
         },
     })
 
@@ -288,6 +297,7 @@ async def _stream_anthropic(
     text_started = False
     text_closed = False
     tool_blocks: list[str] = []
+    stream_text_buf = ""
 
     try:
         async for event in _cw.generate_stream(
@@ -308,6 +318,7 @@ async def _stream_anthropic(
                     })
                     text_started = True
 
+                stream_text_buf += content
                 yield _sse("content_block_delta", {
                     "type": "content_block_delta", "index": block_index,
                     "delta": {"type": "text_delta", "text": content},
@@ -345,10 +356,11 @@ async def _stream_anthropic(
             yield _sse("content_block_stop", {"type": "content_block_stop", "index": block_index})
 
         stop_reason = "tool_use" if tool_blocks else "end_turn"
+        output_tokens = estimate_tokens(stream_text_buf)
         yield _sse("message_delta", {
             "type": "message_delta",
             "delta": {"stop_reason": stop_reason, "stop_sequence": None},
-            "usage": {"output_tokens": 0},
+            "usage": {"output_tokens": output_tokens},
         })
         yield _sse("message_stop", {"type": "message_stop"})
         stats.record(model=model, latency_ms=(time.time() - t0) * 1000, status="ok")
@@ -373,29 +385,24 @@ async def count_tokens(
     authorization: str | None = Header(None),
     x_api_key: str | None = Header(None, alias="x-api-key"),
 ):
-    """Rough token count estimation (~4 chars per token)."""
+    """Token count estimation using character-based heuristics."""
     _check_auth(authorization, x_api_key)
     body = await request.json()
-    total_chars = 0
 
-    system = body.get("system", "")
+    messages = body.get("messages", [])
+    system = body.get("system")
+    system_str = None
     if isinstance(system, str):
-        total_chars += len(system)
+        system_str = system
     elif isinstance(system, list):
-        for b in system:
-            total_chars += len(b.get("text", "")) if isinstance(b, dict) else len(str(b))
+        system_str = "\n".join(b.get("text", "") for b in system if isinstance(b, dict))
 
-    for msg in body.get("messages", []):
-        c = msg.get("content", "")
-        if isinstance(c, str):
-            total_chars += len(c)
-        elif isinstance(c, list):
-            total_chars += len(json.dumps(c))
+    input_tokens = estimate_messages_tokens(messages, system_str)
 
     if body.get("tools"):
-        total_chars += len(json.dumps(body["tools"]))
+        input_tokens += estimate_tokens(json.dumps(body["tools"]))
 
-    return JSONResponse({"input_tokens": max(1, total_chars // 4)})
+    return JSONResponse({"input_tokens": max(1, input_tokens)})
 
 
 @router.post("/messages/batches")

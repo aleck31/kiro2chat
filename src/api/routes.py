@@ -13,6 +13,7 @@ from ..config import config
 from ..core import TokenManager
 from ..core.client import CodeWhispererClient
 from ..core.sanitizer import sanitize_text, KIRO_BUILTIN_TOOLS
+from ..core.token_counter import estimate_tokens, estimate_messages_tokens
 from ..stats import stats
 
 logger = logging.getLogger(__name__)
@@ -144,6 +145,7 @@ async def _stream_response(
     created = int(time.time())
     tool_calls_seen: list[dict] = []
     tool_call_index = 0
+    stream_text_buf = ""
 
     try:
         async for event in cw_client.generate_stream(
@@ -155,6 +157,7 @@ async def _stream_response(
                 if content:
                     content = sanitize_text(content)
                     if content:
+                        stream_text_buf += content
                         yield _make_chunk(chat_id, created, model, {"content": content})
 
             elif event.event_type == "toolUse":
@@ -191,8 +194,11 @@ async def _stream_response(
 
         # Usage chunk if requested
         if include_usage:
+            prompt_tokens = estimate_messages_tokens(messages)
+            completion_tokens = estimate_tokens(stream_text_buf)
             yield _make_chunk(chat_id, created, model, {}, usage={
-                "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+                "prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
             })
 
         yield "data: [DONE]\n\n"
@@ -247,11 +253,18 @@ async def _non_stream_response(
     if tool_calls:
         message["tool_calls"] = tool_calls
 
+    # Token estimation
+    prompt_tokens = estimate_messages_tokens(messages)
+    completion_tokens = estimate_tokens(full_text or "")
+    if tool_calls:
+        for tc in tool_calls:
+            completion_tokens += estimate_tokens(tc["function"]["name"]) + estimate_tokens(tc["function"]["arguments"])
+
     latency = (time.time() - t0) * 1000
     stats.record(model=model, latency_ms=latency, status="ok")
 
     return JSONResponse({
         "id": chat_id, "object": "chat.completion", "created": created, "model": model,
         "choices": [{"index": 0, "message": message, "finish_reason": finish_reason}],
-        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens, "total_tokens": prompt_tokens + completion_tokens},
     })
