@@ -273,6 +273,26 @@ kiro2chat/src/
 
 ## 📝 更新日志
 
+### v0.9.0 — 重试逻辑、测试套件 & 代码质量 (2026-02-27)
+
+#### 🔄 健壮性
+- **CW 后端重试** — 5xx 错误和超时自动重试，指数退避（1s → 3s → 10s，最多 3 次）
+- **2 小时客户端超时** — `httpx` 读取超时设为 7200s，与 Nginx 一致，长输出不会断连
+- **请求 ID** — 每个请求生成 `x-request-id` header，方便追踪调试
+- **API key 安全** — 从 systemd 单元文件移至 `EnvironmentFile`，600 权限保护
+
+#### 🧪 测试套件
+- **39 个 pytest 测试**，覆盖 4 个模块：
+  - `test_sanitizer` — 身份擦除、工具过滤、流式空白、反提示词
+  - `test_token_counter` — tiktoken 精度、CJK、消息计数
+  - `test_converter` — 模型覆盖、反提示词注入、工具结果、图片提取
+  - `test_routes` — 工具验证、过滤
+
+#### 📦 代码质量
+- **ruff** 代码检查配置（行宽 120，Python 3.13）
+- **CONTRIBUTING.md** — 开发环境搭建、测试、PR 指南
+- **pytest** 配置写入 `pyproject.toml`
+
 ### v0.8.0 — 精确 Token 计数 & Nginx 优化 (2026-02-26)
 
 #### 📊 精确 Token 计数

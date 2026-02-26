@@ -281,6 +281,26 @@ kiro2chat/src/
 
 ## 📝 Changelog
 
+### v0.9.0 — Retry Logic, Test Suite & Code Quality (2026-02-27)
+
+#### 🔄 Robustness
+- **CW backend retry** — 5xx errors and timeouts retry with exponential backoff (1s → 3s → 10s, max 3 attempts)
+- **2-hour client timeout** — `httpx` read timeout set to 7200s matching Nginx, no premature disconnects on long outputs
+- **Request ID** — Every request gets an `x-request-id` header for tracing and debugging
+- **API key security** — Moved from systemd unit file to `EnvironmentFile` with 600 permissions
+
+#### 🧪 Test Suite
+- **39 pytest tests** across 4 modules:
+  - `test_sanitizer` — identity scrub, tool filtering, streaming whitespace, anti-prompt
+  - `test_token_counter` — tiktoken accuracy, CJK, message counting
+  - `test_converter` — model override, anti-prompt injection, tool results, image extraction
+  - `test_routes` — tool validation, filtering
+
+#### 📦 Code Quality
+- **ruff** linting config (line-length=120, Python 3.13)
+- **CONTRIBUTING.md** — development setup, testing, PR guidelines
+- **pytest** config in `pyproject.toml`
+
 ### v0.8.0 — Accurate Token Counting & Nginx Optimization (2026-02-26)
 
 #### 📊 Accurate Token Counting
