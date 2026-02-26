@@ -95,8 +95,25 @@ def openai_to_codewhisperer(
 
     user_buffer: list[dict] = []  # Buffer of user/tool messages
 
-    # All messages except last go into history
-    history_messages = conv_messages[:-1] if conv_messages else []
+    # Split: find the boundary between history and current message
+    # If trailing messages are tool role, they form the current toolResults
+    # The assistant before them must be in history
+    trailing_tool_start = len(conv_messages)
+    for i in range(len(conv_messages) - 1, -1, -1):
+        if conv_messages[i].get("role") == "tool":
+            trailing_tool_start = i
+        else:
+            break
+
+    # If last message is tool, current = toolResults; history = everything before
+    # If last message is user, current = user message; history = everything before
+    if trailing_tool_start < len(conv_messages):
+        # Tool result mode
+        history_messages = conv_messages[:trailing_tool_start]
+        current_tool_msgs = conv_messages[trailing_tool_start:]
+    else:
+        history_messages = conv_messages[:-1] if conv_messages else []
+        current_tool_msgs = []
 
     for msg in history_messages:
         role = msg.get("role", "")
@@ -109,8 +126,8 @@ def openai_to_codewhisperer(
                 history.append(user_msg)
                 user_buffer = []
 
-                assistant_msg = _build_history_assistant_message(msg)
-                history.append(assistant_msg)
+            assistant_msg = _build_history_assistant_message(msg)
+            history.append(assistant_msg)
 
     # Handle remaining buffered user/tool messages
     if user_buffer:
@@ -123,32 +140,17 @@ def openai_to_codewhisperer(
             }
         })
 
-    # Build current message from the last conv_messages entry
-    last_msg = conv_messages[-1] if conv_messages else {"role": "user", "content": "Hello"}
-    last_role = last_msg.get("role", "user")
-
-    # The last message could be a user msg or a tool msg (after tool execution)
-    # If it's a tool message, we need to collect it (and any preceding tool messages)
-    # Actually, the last message should typically be user or tool
-    if last_role == "tool":
-        # Collect all trailing tool messages as current message with tool results
-        # Look back from the end of conv_messages for consecutive tool messages
-        trailing_tool_msgs = []
-        idx = len(conv_messages) - 1
-        while idx >= 0 and conv_messages[idx].get("role") == "tool":
-            trailing_tool_msgs.insert(0, conv_messages[idx])
-            idx -= 1
-
-        # Rebuild history without these trailing tool messages
-        # We need to redo history processing... Instead, build tool results for current message
-        tool_results = _extract_tool_results_from_messages(trailing_tool_msgs)
-
+    # Build current message
+    if current_tool_msgs:
+        # Tool result mode: send tool results as current message
+        tool_results = _extract_tool_results_from_messages(current_tool_msgs)
         current_content = ""
         current_user_msg_context: dict[str, Any] = {
             "toolResults": tool_results,
             "tools": cw_tools,
         }
     else:
+        last_msg = conv_messages[-1] if conv_messages else {"role": "user", "content": "Hello"}
         current_content = _extract_text(last_msg.get("content", "Hello"))
         current_user_msg_context = {
             "toolResults": [],
