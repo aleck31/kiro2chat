@@ -14,7 +14,7 @@ Full /v1/messages compatibility including:
 import json
 import time
 import uuid
-import logging
+from loguru import logger
 from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -27,9 +27,8 @@ from ..core.sanitizer import sanitize_text, KIRO_BUILTIN_TOOLS
 from ..core.token_counter import estimate_tokens, estimate_messages_tokens
 from ..stats import stats
 
-logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/v1")
+router = APIRouter(prefix="/v1", tags=["Anthropic"])
 
 _tm: TokenManager | None = None
 _cw: CodeWhispererClient | None = None

@@ -10,6 +10,7 @@ dependencies = [
     "aiogram>=3.25.0",
     "gradio>=6.5.1",
     "httpx>=0.28.1",
+    "loguru>=0.7.0",
     "openai>=1.0.0",
     "prometheus-client>=0.20.0",
     "strands-agents>=1.26.0",

@@ -1,7 +1,7 @@
 """CodeWhisperer API client with retry logic."""
 
 import asyncio
-import logging
+from loguru import logger
 import uuid
 from typing import AsyncIterator
 
@@ -11,7 +11,6 @@ from ..config import config
 from .converter import openai_to_codewhisperer
 from .eventstream import EventStreamMessage, parse_streaming_eventstream
 
-logger = logging.getLogger(__name__)
 
 # CW backend timeout: 2 hours for long outputs
 CW_TIMEOUT = httpx.Timeout(connect=30.0, read=7200.0, write=30.0, pool=30.0)

@@ -1,14 +1,13 @@
 """Agent API routes for kiro2chat — Strands Agent streaming endpoints."""
 
 import json
-import logging
+from loguru import logger
 import time
 from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/agent")
 

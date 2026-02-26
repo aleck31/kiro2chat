@@ -3,14 +3,13 @@
 import json
 import sqlite3
 import time
-import logging
+from loguru import logger
 from dataclasses import dataclass
 
 import httpx
 
 from ..config import config
 
-logger = logging.getLogger(__name__)
 
 
 @dataclass

@@ -3,7 +3,7 @@
 import json
 import time
 import uuid
-import logging
+from loguru import logger
 from typing import AsyncIterator
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -17,9 +17,8 @@ from ..core.token_counter import estimate_tokens, estimate_messages_tokens
 from ..stats import stats
 from ..metrics import TOKENS_INPUT, TOKENS_OUTPUT, TOOL_CALLS, ERRORS
 
-logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/v1")
+router = APIRouter(prefix="/v1", tags=["OpenAI"])
 
 token_manager: TokenManager | None = None
 cw_client: CodeWhispererClient | None = None
@@ -179,11 +178,14 @@ async def _stream_response(
                             except json.JSONDecodeError:
                                 input_obj = {"raw": _active_tool["input_buf"]}
                             arguments = json.dumps(input_obj)
+                            # Emit name chunk
                             tc_base = {"index": tool_call_index, "id": _active_tool["id"], "type": "function",
                                        "function": {"name": _active_tool["name"], "arguments": ""}}
                             yield _make_chunk(chat_id, created, model, {"tool_calls": [tc_base]})
-                            tc_args = {"index": tool_call_index, "function": {"arguments": arguments}}
-                            yield _make_chunk(chat_id, created, model, {"tool_calls": [tc_args]})
+                            # Emit arguments in incremental chunks (~40 chars each)
+                            for i in range(0, len(arguments), 40):
+                                tc_args = {"index": tool_call_index, "function": {"arguments": arguments[i:i+40]}}
+                                yield _make_chunk(chat_id, created, model, {"tool_calls": [tc_args]})
                             tool_calls_seen.append(_active_tool["name"])
                             tool_call_index += 1
                         _active_tool = None
@@ -205,8 +207,9 @@ async def _stream_response(
                 tc_base = {"index": tool_call_index, "id": tc_id, "type": "function",
                            "function": {"name": name, "arguments": ""}}
                 yield _make_chunk(chat_id, created, model, {"tool_calls": [tc_base]})
-                tc_args = {"index": tool_call_index, "function": {"arguments": arguments}}
-                yield _make_chunk(chat_id, created, model, {"tool_calls": [tc_args]})
+                for i in range(0, len(arguments), 40):
+                    tc_args = {"index": tool_call_index, "function": {"arguments": arguments[i:i+40]}}
+                    yield _make_chunk(chat_id, created, model, {"tool_calls": [tc_args]})
                 tool_calls_seen.append(name)
                 tool_call_index += 1
 

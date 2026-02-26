@@ -5,7 +5,7 @@ with MCP tool support loaded from ~/.config/kiro2chat/mcp.json.
 """
 
 import json
-import logging
+from loguru import logger
 from pathlib import Path
 from typing import Any
 from mcp.client.stdio import StdioServerParameters, stdio_client
@@ -14,7 +14,6 @@ from strands.models.openai import OpenAIModel
 from strands.tools.mcp import MCPClient
 from strands_tools import calculator, file_read, file_write, http_request, shell
 
-logger = logging.getLogger(__name__)
 
 MCP_CONFIG_PATH = Path.home() / ".config" / "kiro2chat" / "mcp.json"
 

@@ -1,7 +1,6 @@
 """kiro2chat - Main application entry point."""
 
 import asyncio
-import logging
 import sys
 import signal
 import uuid
@@ -19,28 +18,9 @@ from .api.routes import router, init_services
 from .api.agent_routes import router as agent_router, init_agent_routes
 from .api.anthropic_routes import router as anthropic_router, init_anthropic_routes
 
-# Configure logging (JSON structured for production)
-import json as _json_mod
-
-class JSONFormatter(logging.Formatter):
-    def format(self, record):
-        log = {
-            "ts": self.formatTime(record),
-            "level": record.levelname,
-            "logger": record.name,
-            "msg": record.getMessage(),
-        }
-        if record.exc_info and record.exc_info[0]:
-            log["exception"] = self.formatException(record.exc_info)
-        return _json_mod.dumps(log, ensure_ascii=False)
-
-_handler = logging.StreamHandler()
-_handler.setFormatter(JSONFormatter())
-logging.basicConfig(
-    level=getattr(logging, config.log_level.upper(), logging.INFO),
-    handlers=[_handler],
-)
-logger = logging.getLogger(__name__)
+# Configure loguru
+from . import log  # noqa: F401 — initializes loguru
+from loguru import logger
 
 # Module-level refs for health check
 token_manager: "TokenManager | None" = None
@@ -90,9 +70,28 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="kiro2chat",
-    description="Kiro to Chat - OpenAI & Anthropic compatible API Gateway",
+    description="""
+## Kiro → Standard API Gateway
+
+Wrap Kiro CLI's Claude Opus 4.6 backend into a fully compatible OpenAI + Anthropic API Gateway.
+
+### Endpoints
+- **OpenAI**: `/v1/chat/completions`, `/v1/models`
+- **Anthropic**: `/v1/messages`, `/v1/messages/count_tokens`
+- **Monitoring**: `/health`, `/metrics`
+
+### Features
+- Dual protocol (OpenAI + Anthropic)
+- Claude Opus 4.6 1M context window
+- Full tool calling with MCP support
+- Image recognition
+- System prompt sanitization
+- Token usage estimation (tiktoken)
+""",
     version=__version__,
     lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
 )
 
 # CORS

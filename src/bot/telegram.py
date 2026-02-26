@@ -3,7 +3,7 @@
 import asyncio
 import os
 import json
-import logging
+from loguru import logger
 import re
 from collections import defaultdict
 from typing import Optional
@@ -14,7 +14,6 @@ from aiogram.types import Message, BotCommand
 from aiogram.filters import Command
 from aiogram.enums import ParseMode
 
-logger = logging.getLogger(__name__)
 
 API_BASE = "http://localhost:8000"
 EDIT_INTERVAL = 15  # edit message every N chunks to avoid rate limits

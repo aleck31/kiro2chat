@@ -9,7 +9,7 @@
   ![Python](https://img.shields.io/badge/python-≥3.13-blue?logo=python&logoColor=white)
   ![FastAPI](https://img.shields.io/badge/FastAPI-0.129+-green?logo=fastapi&logoColor=white)
   ![License](https://img.shields.io/badge/license-MIT-blue)
-  ![Version](https://img.shields.io/badge/version-0.9.0-purple)
+  ![Version](https://img.shields.io/badge/version-1.0.0-purple)
 </div>
 
 ---
@@ -280,6 +280,23 @@ kiro2chat/src/
 | Python | ≥ 3.13 |
 
 ## 📝 Changelog
+
+### v1.0.0 — Production Release (2026-02-27)
+
+#### 📦 Production Ready
+- **loguru** logging framework — structured, colorized, with stdlib interception
+- **Prometheus /metrics** — requests, latency histogram, tokens, tool calls, errors, retries
+- **Swagger /docs** — full OpenAPI documentation with endpoint descriptions
+- **39 pytest tests** — sanitizer, token counter, converter, routes
+
+#### 🔧 Streaming Enhancements
+- **Incremental tool_calls** — arguments sent in ~40 char chunks (OpenAI standard)
+- **Anthropic thinking blocks** — passthrough support for extended thinking
+
+#### 📝 Documentation
+- **docs/DEPLOYMENT.md** — complete deployment guide (systemd, nginx, monitoring)
+- **CONTRIBUTING.md** — development setup and PR guidelines
+- Bilingual README (EN/CN) with full changelog
 
 ### v0.9.0 — Retry Logic, Test Suite & Code Quality (2026-02-27)
 
