@@ -148,6 +148,7 @@ async def _stream_response(
     stream_text_buf = ""
     # Track streaming toolUseEvent aggregation
     _active_tool: dict | None = None  # {id, name, input_buf}
+    output_truncated = False
 
     try:
         async for event in cw_client.generate_stream(
@@ -213,14 +214,19 @@ async def _stream_response(
                 tool_calls_seen.append(name)
                 tool_call_index += 1
 
-            elif event.event_type in ("supplementaryWebLinksEvent", "meteringEvent", "contextUsageEvent"):
+            elif event.event_type in ("supplementaryWebLinksEvent", "meteringEvent"):
                 pass
+
+            elif event.event_type == "contextUsageEvent":
+                pct = event.payload.get("contextUsagePercentage", 0)
+                if pct > 0.95:
+                    output_truncated = True
 
             elif event.event_type == "exception":
                 error_msg = event.payload.get("message", str(event.payload))
                 yield _make_chunk(chat_id, created, model, {"content": f"\n\n[Error: {error_msg}]"}, finish_reason="stop")
 
-        finish_reason = "tool_calls" if tool_calls_seen else "stop"
+        finish_reason = "tool_calls" if tool_calls_seen else ("length" if output_truncated else "stop")
         yield _make_chunk(chat_id, created, model, {}, finish_reason=finish_reason)
 
         # Usage chunk if requested
@@ -252,6 +258,7 @@ async def _non_stream_response(
     tool_calls: list[dict] = []
     tool_call_index = 0
     _active_tool: dict | None = None
+    output_truncated = False
 
     async for event in cw_client.generate_stream(
         access_token=access_token, messages=messages, model=model,
@@ -297,11 +304,14 @@ async def _non_stream_response(
                 "function": {"name": name, "arguments": arguments},
             })
             tool_call_index += 1
+        elif event.event_type == "contextUsageEvent":
+            if event.payload.get("contextUsagePercentage", 0) > 0.95:
+                output_truncated = True
         elif event.event_type == "exception":
             raise HTTPException(status_code=502, detail={"error": {"message": event.payload.get("message", ""), "type": "upstream_error"}})
 
     full_text = sanitize_text("".join(text_parts))
-    finish_reason = "tool_calls" if tool_calls else "stop"
+    finish_reason = "tool_calls" if tool_calls else ("length" if output_truncated else "stop")
 
     message: dict = {"role": "assistant", "content": full_text or None}
     if tool_calls:

@@ -234,6 +234,7 @@ async def anthropic_messages(
     text_parts: list[str] = []
     content_blocks: list[dict] = []
     _active_tool: dict | None = None
+    output_truncated = False
 
     async for event in _cw.generate_stream(
         access_token=access_token, messages=messages, model=model, profile_arn=profile_arn, tools=tools,
@@ -274,6 +275,9 @@ async def anthropic_messages(
                 "id": tool_use_id or f"toolu_{uuid.uuid4().hex[:24]}",
                 "name": name, "input": payload.get("input", {}),
             })
+        elif event.event_type == "contextUsageEvent":
+            if event.payload.get("contextUsagePercentage", 0) > 0.95:
+                output_truncated = True
         elif event.event_type == "exception":
             raise HTTPException(status_code=502, detail={"type": "api_error", "message": event.payload.get("message", "")})
 
@@ -281,7 +285,7 @@ async def anthropic_messages(
     if full_text:
         content_blocks.insert(0, {"type": "text", "text": full_text})
 
-    stop_reason = "tool_use" if any(b["type"] == "tool_use" for b in content_blocks) else "end_turn"
+    stop_reason = "tool_use" if any(b["type"] == "tool_use" for b in content_blocks) else ("max_tokens" if output_truncated else "end_turn")
     stats.record(model=model, latency_ms=(time.time() - t0) * 1000, status="ok")
 
     # Token estimation
@@ -320,6 +324,7 @@ async def _stream_anthropic(
     text_closed = False
     tool_blocks: list[str] = []
     stream_text_buf = ""
+    output_truncated = False
 
     try:
         async for event in _cw.generate_stream(
@@ -377,7 +382,7 @@ async def _stream_anthropic(
         if text_started and not text_closed:
             yield _sse("content_block_stop", {"type": "content_block_stop", "index": block_index})
 
-        stop_reason = "tool_use" if tool_blocks else "end_turn"
+        stop_reason = "tool_use" if tool_blocks else ("max_tokens" if output_truncated else "end_turn")
         output_tokens = estimate_tokens(stream_text_buf)
         yield _sse("message_delta", {
             "type": "message_delta",
