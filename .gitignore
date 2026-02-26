@@ -8,3 +8,7 @@ build/
 .env
 *.sqlite3
 .uv/
+.kiro/
+*.log
+config.toml
+mcp.json

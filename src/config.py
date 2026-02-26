@@ -62,24 +62,54 @@ class Config:
     # CodeWhisperer profile ARN (read from kiro-cli state)
     profile_arn: str = os.getenv("PROFILE_ARN", "")
 
-    # Model mapping: OpenAI model name -> CodeWhisperer model ID
+    # Model mapping: all names accepted, backend always uses Opus 4.6 1M
+    # This map is only used for /v1/models listing
     model_map: dict[str, str] = field(default_factory=lambda: {
+        # Opus 4.6 (actual backend model)
+        "claude-opus-4.6-1m": "claude-opus-4.6-1m",
+        "claude-opus-4.6": "claude-opus-4.6-1m",
+        # Sonnet 4.6
+        "claude-sonnet-4.6": "claude-opus-4.6-1m",
+        "claude-sonnet-4.6-1m": "claude-opus-4.6-1m",
+        # Opus 4.5
+        "claude-opus-4.5": "claude-opus-4.6-1m",
+        "claude-opus-4-5": "claude-opus-4.6-1m",
+        "claude-opus-4-5-20251101": "claude-opus-4.6-1m",
         # Sonnet 4.5
-        "claude-sonnet-4-5": "CLAUDE_SONNET_4_5_20250929_V1_0",
-        "claude-sonnet-4-5-20250929": "CLAUDE_SONNET_4_5_20250929_V1_0",
+        "claude-sonnet-4.5": "claude-opus-4.6-1m",
+        "claude-sonnet-4.5-1m": "claude-opus-4.6-1m",
+        "claude-sonnet-4-5": "claude-opus-4.6-1m",
+        "claude-sonnet-4-5-20250929": "claude-opus-4.6-1m",
         # Sonnet 4
-        "claude-sonnet-4": "CLAUDE_SONNET_4_20250514_V1_0",
-        "claude-sonnet-4-20250514": "CLAUDE_SONNET_4_20250514_V1_0",
-        # Sonnet 3.7
-        "claude-3.7-sonnet": "CLAUDE_3_7_SONNET_20250219_V1_0",
-        "claude-3-7-sonnet-20250219": "CLAUDE_3_7_SONNET_20250219_V1_0",
+        "claude-sonnet-4": "claude-opus-4.6-1m",
+        "claude-sonnet-4-20250514": "claude-opus-4.6-1m",
         # Haiku 4.5
-        "claude-haiku-4-5": "auto",
-        "claude-3-5-haiku-20241022": "auto",
+        "claude-haiku-4.5": "claude-opus-4.6-1m",
+        "claude-haiku-4-5": "claude-opus-4.6-1m",
+        "claude-3-5-haiku-20241022": "claude-opus-4.6-1m",
+        # Sonnet 3.7
+        "claude-3.7-sonnet": "claude-opus-4.6-1m",
+        "claude-3-7-sonnet-20250219": "claude-opus-4.6-1m",
+        # Auto
+        "auto": "claude-opus-4.6-1m",
+        # Third-party models in Kiro
+        "deepseek-3.2": "claude-opus-4.6-1m",
+        "kimi-k2.5": "claude-opus-4.6-1m",
+        "minimax-m2.1": "claude-opus-4.6-1m",
+        "glm-4.7": "claude-opus-4.6-1m",
+        "glm-4.7-flash": "claude-opus-4.6-1m",
+        "qwen3-coder-next": "claude-opus-4.6-1m",
+        "agi-nova-beta-1m": "claude-opus-4.6-1m",
+        # OpenAI-style aliases
+        "gpt-4o": "claude-opus-4.6-1m",
+        "gpt-4o-mini": "claude-opus-4.6-1m",
+        "gpt-4-turbo": "claude-opus-4.6-1m",
+        "gpt-4": "claude-opus-4.6-1m",
+        "gpt-3.5-turbo": "claude-opus-4.6-1m",
     })
 
     # Default model when client doesn't specify
-    default_model: str = _get("default_model", "DEFAULT_MODEL", "claude-sonnet-4-5")
+    default_model: str = _get("default_model", "DEFAULT_MODEL", "claude-opus-4-6")
 
 
 config = Config()

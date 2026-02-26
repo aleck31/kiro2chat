@@ -1,174 +1,356 @@
-# kiro2chat
+<div align="center">
+  <img src="docs/logo.png" alt="kiro2chat logo" width="128" height="128">
+  <h1>kiro2chat</h1>
+  <p><strong>Kiro → Standard API Gateway</strong></p>
+  <p>将 Kiro CLI 的 Claude Opus 4.6 后端封装为完全兼容的 OpenAI + Anthropic API Gateway</p>
 
-Kiro to Chat — 利用 Kiro CLI 的认证，将 AWS CodeWhisperer 后端的 Claude 模型封装为 OpenAI 兼容 API，并集成 Strands Agent 框架提供工具调用能力。
+  ![Python](https://img.shields.io/badge/python-≥3.13-blue?logo=python&logoColor=white)
+  ![FastAPI](https://img.shields.io/badge/FastAPI-0.129+-green?logo=fastapi&logoColor=white)
+  ![License](https://img.shields.io/badge/license-MIT-blue)
+  ![Version](https://img.shields.io/badge/version-0.5.0-purple)
+</div>
 
+---
 
-> ⚠️ 注意：**Kiro 后端注入的 System Prompt**，包含大量 IDE 工具定义（readFile, fsWrite, webSearch 等）。这些工具只在 Kiro IDE 内有效，通过 kiro2chat 调用时无法执行。当前用 system prompt 告知 Claude 忽略这些，但效果有限。
+## ✨ Features
 
-## 技术架构
+- 🔄 **双协议兼容** — 同时支持 OpenAI `/v1/chat/completions` 和 Anthropic `/v1/messages` 格式
+- 🧠 **Claude Opus 4.6 1M** — 后端固定使用最强模型，1M 上下文窗口
+- 🧹 **System Prompt 清洗** — 三层防御彻底清除 Kiro IDE 注入的系统提示词和工具定义
+- 🛠️ **完整 Tool Calling** — 支持工具定义、tool_choice、tool_result 多轮回传
+- 📡 **流式 + 非流式** — 两种 API 格式均支持 SSE 流式和同步响应
+- 🔑 **自动 Token 管理** — 从 kiro-cli SQLite 读取并自动刷新 IdC Token
+- 🤖 **Strands Agent** — 可选的 Agent 层，支持 MCP 工具
+- 🌐 **Web UI** — Gradio 多页面界面（聊天、监控、配置）
+- 📱 **Telegram Bot** — 通过 Agent 层的 TG 机器人
 
-### 整体架构
+## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                       客户端层                            │
-│  TG Bot ─┐                                              │
-│  WebUI  ─┤─→ /v1/agent/chat ─→ Strands Agent           │
-│  CLI    ─┘                      (built-in + MCP tools)  │
-│                                       │                  │
-│                                       ↓                │
-│                              /v1/chat/completions        │
-│                                       │                  │
-├───────────────────────────────────────┼──────────────────┤
-│                    协议转换层          │                  │
-│              OpenAI → CodeWhisperer   │                  │
-│              (converter.py)           │                  │
-│                                       ↓                  │
-│              EventStream 解析 ← CodeWhisperer API        │
-│              (eventstream.py)                            │
-├─────────────────────────────────────────────────────────┤
-│                     认证层                               │
-│         kiro-cli SQLite → IdC Token Refresh              │
-│         (~/.local/share/kiro-cli/data.sqlite3)           │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                        Client Layer                          │
+│                                                              │
+│  OpenAI SDK ──┐                                              │
+│  Anthropic SDK┤──→ /v1/chat/completions (OpenAI format)      │
+│  Claude Code ─┤──→ /v1/messages         (Anthropic format)   │
+│  Any Client  ─┘                                              │
+│                           │                                  │
+├───────────────────────────┼──────────────────────────────────┤
+│                   Protocol Layer                             │
+│                           │                                  │
+│    ┌──────────────────────┼──────────────────────┐           │
+│    │  Anti-Prompt Injection (sanitizer.py)        │           │
+│    │  → Strips Kiro IDE system prompt             │           │
+│    │  → Blocks IDE tool leakage                   │           │
+│    │  → Enforces Claude identity                  │           │
+│    └──────────────────────┼──────────────────────┘           │
+│                           │                                  │
+│    OpenAI/Anthropic → CodeWhisperer (converter.py)           │
+│    EventStream Binary → JSON (eventstream.py)                │
+│    Response → Sanitized Output (sanitizer.py)                │
+│                           │                                  │
+├───────────────────────────┼──────────────────────────────────┤
+│                    Auth Layer                                │
+│    kiro-cli SQLite → IdC Token Auto-Refresh                  │
+│    (~/.local/share/kiro-cli/data.sqlite3)                    │
+│                           │                                  │
+│                           ↓                                  │
+│    CodeWhisperer API (claude-opus-4.6-1m)                    │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## 项目结构
+## 📋 API Endpoints
+
+| Endpoint | Method | Format | Description |
+|----------|--------|--------|-------------|
+| `/v1/chat/completions` | POST | OpenAI | Chat completions (stream + non-stream) |
+| `/v1/models` | GET | OpenAI | List available models |
+| `/v1/messages` | POST | Anthropic | Messages API (stream + non-stream) |
+| `/v1/messages/count_tokens` | POST | Anthropic | Token count estimation |
+| `/v1/messages/batches` | POST | Anthropic | Batch API (stub, 501) |
+| `/v1/agent/chat` | POST | Custom | Strands Agent chat |
+| `/v1/agent/tools` | GET | Custom | List loaded tools |
+| `/health` | GET | — | Health check |
+| `/` | GET | — | Service info |
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+```bash
+# 1. Install kiro-cli and login
+kiro-cli login
+
+# 2. Clone and install
+git clone https://github.com/neosun100/kiro2chat.git
+cd kiro2chat
+uv sync
+```
+
+### Run
+
+```bash
+# API server only (port 8000)
+uv run kiro2chat api
+
+# Web UI (port 7860)
+uv run kiro2chat webui
+
+# Telegram Bot
+uv run kiro2chat bot
+
+# All together
+uv run kiro2chat all
+```
+
+### Use with OpenAI SDK
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8000/v1", api_key="not-needed")
+
+response = client.chat.completions.create(
+    model="claude-opus-4.6-1m",  # Any model name works
+    messages=[{"role": "user", "content": "Hello!"}],
+)
+print(response.choices[0].message.content)
+```
+
+### Use with Anthropic SDK
+
+```python
+import anthropic
+
+client = anthropic.Anthropic(base_url="http://localhost:8000", api_key="not-needed")
+
+message = client.messages.create(
+    model="claude-opus-4.6-1m",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "Hello!"}],
+)
+print(message.content[0].text)
+```
+
+### Use with curl
+
+```bash
+# OpenAI format
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gpt-4o", "messages": [{"role": "user", "content": "Hello"}]}'
+
+# Anthropic format
+curl http://localhost:8000/v1/messages \
+  -H "Content-Type: application/json" \
+  -d '{"model": "claude-opus-4.6-1m", "max_tokens": 1024, "messages": [{"role": "user", "content": "Hello"}]}'
+```
+
+## 🔧 API Compatibility
+
+### OpenAI `/v1/chat/completions`
+
+| Feature | Status |
+|---------|--------|
+| Text generation (stream + non-stream) | ✅ |
+| System / Developer role messages | ✅ |
+| Multi-turn conversations | ✅ |
+| Tool definitions + tool_calls | ✅ |
+| Tool result round-trip | ✅ |
+| tool_choice (none/auto/required) | ✅ |
+| temperature / top_p / stop | ✅ |
+| presence_penalty / frequency_penalty | ✅ |
+| stream_options (include_usage) | ✅ |
+| Any model name accepted | ✅ |
+| Incremental streaming tool_calls | ✅ |
+
+### Anthropic `/v1/messages`
+
+| Feature | Status |
+|---------|--------|
+| Text generation (stream + non-stream) | ✅ |
+| System prompt (string + content blocks) | ✅ |
+| Multi-turn conversations | ✅ |
+| Tool definitions (Anthropic format) | ✅ |
+| tool_result round-trip | ✅ |
+| tool_choice (auto/any/tool/none) | ✅ |
+| Image blocks (base64 + URL) | ✅ |
+| Thinking blocks (passthrough) | ✅ |
+| stop_sequences | ✅ |
+| SSE events (message_start/delta/stop) | ✅ |
+| input_json_delta streaming | ✅ |
+| count_tokens endpoint | ✅ |
+
+## 🧹 System Prompt Sanitization
+
+Kiro's CodeWhisperer backend injects an IDE system prompt containing tool definitions (readFile, fsWrite, webSearch, etc.) that don't exist outside the IDE. kiro2chat implements **three-layer defense**:
+
+1. **Anti-Prompt Injection** — Prepends a high-priority override to every request, declaring the true identity (Claude by Anthropic) and explicitly denying all IDE tools
+2. **Assistant Confirmation** — Injects a fake assistant turn confirming it will ignore IDE tools
+3. **Response Sanitization** — Regex-based post-processing strips any leaked tool names, Kiro identity references, and XML markup from output
+
+**Result**: 28/28 adversarial test scenarios pass with zero leakage.
+
+## ⚙️ Configuration
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HOST` | `0.0.0.0` | Server bind address |
+| `PORT` | `8000` | API server port |
+| `KIRO_DB_PATH` | `~/.local/share/kiro-cli/data.sqlite3` | kiro-cli database path |
+| `API_KEY` | *(none)* | Optional API authentication key |
+| `TG_BOT_TOKEN` | *(none)* | Telegram Bot token |
+| `LOG_LEVEL` | `info` | Logging level |
+
+### Config File
+
+`~/.config/kiro2chat/config.toml` — editable via Web UI or manually.
+
+### Model Mapping
+
+All model names are accepted. The backend always uses `claude-opus-4.6-1m`. Common aliases:
+
+| Client sends | Backend uses |
+|---|---|
+| `gpt-4o`, `gpt-4`, `gpt-3.5-turbo` | `claude-opus-4.6-1m` |
+| `claude-opus-4.6-1m`, `claude-opus-4.6` | `claude-opus-4.6-1m` |
+| `claude-sonnet-4.5`, `claude-sonnet-4` | `claude-opus-4.6-1m` |
+| Any other string | `claude-opus-4.6-1m` |
+
+## 🚢 Deployment
+
+### Systemd Service
+
+```bash
+# Install service
+sudo cp kiro2chat@.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now kiro2chat@$(whoami)
+
+# Check status
+sudo systemctl status kiro2chat@$(whoami)
+journalctl -u kiro2chat@$(whoami) -f
+```
+
+### Docker (coming soon)
+
+## 📁 Project Structure
 
 ```
 kiro2chat/src/
-├── __init__.py           # 版本号 (__version__)
-├── _tool_names.py        # 内置工具名称注册（避免循环导入）
-├── app.py                # 入口，FastAPI app，lifespan，CLI 子命令
-├── config.py             # 配置（env vars > config.toml > 默认值）
-├── config_manager.py     # TOML 配置读写 + Kiro MCP 配置读取
-├── stats.py              # 线程安全的请求统计收集器
-├── webui.py              # Gradio 多页面 Web UI (Navbar)
-├── agent.py              # Strands Agent 创建、MCP 工具加载
+├── __init__.py              # Version (__version__ = "0.5.0")
+├── app.py                   # FastAPI app, lifespan, CLI, CORS, exception handlers
+├── config.py                # Config (env > TOML > defaults)
+├── config_manager.py        # TOML config read/write + MCP config
+├── stats.py                 # Thread-safe request statistics
+├── webui.py                 # Gradio multi-page Web UI
+├── agent.py                 # Strands Agent + MCP tools
+├── _tool_names.py           # Built-in tool name registry
 ├── core/
-│   ├── __init__.py       # TokenManager 导出
-│   ├── client.py         # CodeWhisperer API 客户端 (httpx async)
-│   ├── converter.py      # OpenAI ↔ CodeWhisperer 协议转换
-│   └── eventstream.py    # AWS EventStream 二进制协议解析
+│   ├── __init__.py          # TokenManager (IdC token refresh)
+│   ├── client.py            # CodeWhisperer API client (httpx async)
+│   ├── converter.py         # OpenAI ↔ CodeWhisperer protocol conversion
+│   ├── eventstream.py       # AWS EventStream binary parser
+│   ├── sanitizer.py         # Anti-prompt + response cleansing + identity scrub
+│   └── health.py            # Health check utilities
 ├── api/
-│   ├── __init__.py
-│   ├── routes.py         # /v1/chat/completions, /v1/models
-│   └── agent_routes.py   # /v1/agent/chat, /v1/agent/tools, /v1/agent/reload
+│   ├── routes.py            # /v1/chat/completions, /v1/models (OpenAI)
+│   ├── anthropic_routes.py  # /v1/messages, /v1/messages/count_tokens (Anthropic)
+│   └── agent_routes.py      # /v1/agent/* (Strands Agent)
 └── bot/
-    ├── __init__.py
-    └── telegram.py       # Telegram Bot (aiogram)
+    └── telegram.py          # Telegram Bot (aiogram)
 ```
 
-## 技术栈
+## 📊 Tech Stack
 
-| 组件 | 技术 |
-|------|------|
-| Web 框架 | FastAPI + Uvicorn (4 workers) |
-| HTTP 客户端 | httpx (async) |
+| Component | Technology |
+|-----------|-----------|
+| Web Framework | FastAPI + Uvicorn |
+| HTTP Client | httpx (async) |
 | AI Agent | Strands Agents SDK |
-| LLM Provider | LiteLLM → kiro2chat API (OpenAI 兼容) |
-| Web UI | Gradio 6 (Navbar 多页面) |
+| Web UI | Gradio 6 |
 | Telegram Bot | aiogram 3 |
-| 配置管理 | python-dotenv + TOML (tomllib/tomli-w) |
-| 认证 | kiro-cli SQLite → AWS IdC OIDC Token Refresh |
-| 包管理 | uv + hatchling |
+| Config | python-dotenv + TOML |
+| Auth | kiro-cli SQLite → AWS IdC OIDC |
+| Package Manager | uv + hatchling |
 | Python | ≥ 3.13 |
 
-## 应用模块说明
+## 📝 Changelog
 
-### API 路由 (`api/routes.py`)
-- `GET /v1/models` — 列出可用模型
-- `POST /v1/chat/completions` — OpenAI 兼容的聊天接口（流式/非流式）
-  - 支持 tool_calls 返回（流式 chunk + 非流式 message）
-  - 支持 tool role 消息回传
+### v0.5.0 — API Gateway (2026-02-26)
 
-### Agent 路由 (`api/agent_routes.py`)
-- `POST /v1/agent/chat` — 通过 Strands Agent 聊天（支持 stream=true SSE）
-- `GET /v1/agent/tools` — 列出已加载工具
-- `POST /v1/agent/reload` — 重新加载 MCP 工具
+**Major upgrade: Full OpenAI + Anthropic API compatibility**
 
-### Agent (`agent.py`)
-- 创建 Strands Agent，使用 LiteLLM 指向 localhost:8000 的 OpenAI 兼容 API
-- 内置工具：calculator, file_read, file_write, http_request, shell
-- MCP 工具从 `~/.kiro/settings/mcp.json` 加载（复用 Kiro CLI 配置）
-- System prompt 引导 Agent 基于 tool spec 自主判断可用工具
+#### 🔄 Dual Protocol Support
+- **Anthropic Messages API** (`/v1/messages`) — full compatibility with streaming, tools, system prompts, images, thinking blocks
+- **`/v1/messages/count_tokens`** — token count estimation endpoint
+- **`/v1/messages/batches`** — stub endpoint (501)
 
-### Telegram Bot (`bot/telegram.py`)
-- 通过 `/v1/agent/chat` 流式调用 Strands Agent
-- 会话隔离：session key = `(chat_id, user_id)`
-- 每会话 asyncio.Lock 防止消息乱序
-- 命令：`/model`, `/tools`, `/clear`, `/help`
-- 过滤原始 XML/function_calls 标记
-- 最大历史 20 条消息
+#### 🧠 Backend Model
+- Fixed backend to **Claude Opus 4.6 1M** (`claude-opus-4.6-1m`)
+- All model names accepted (gpt-4o, claude-sonnet-4, any string)
+- Discovered correct model ID format and required `KiroIDE` User-Agent header
 
-### Web UI (`webui.py`)
-- **聊天页**：模型选择 + 工具列表 + ChatInterface（直接调 /v1/chat/completions）
-- **系统配置页**：可视化编辑所有配置项，保存到 `~/.config/kiro2chat/config.toml`
-- **监控面板**：请求统计、延迟、错误率、最近请求日志（5s 自动刷新）
-- **Agent 页**：通过 Strands Agent 聊天 + MCP 配置编辑
+#### 🧹 System Prompt Sanitization (3-layer defense)
+- **Anti-prompt injection**: High-priority override denying Kiro identity and IDE tools
+- **Assistant confirmation**: Fake turn reinforcing Claude identity
+- **Response sanitization**: Regex scrubbing of tool names, Kiro references, XML markup
+- 28/28 adversarial test scenarios pass with zero leakage
 
-### 配置 (`config.py` + `config_manager.py`)
-- 优先级：环境变量 > `~/.config/kiro2chat/config.toml` > 默认值
-- MCP 配置直接读取 `~/.kiro/settings/mcp.json`
-- 统计收集器 (`stats.py`)：线程安全，deque 最近 100 条记录
+#### 🛠️ OpenAI Compatibility Enhancements
+- Parameter passthrough: `temperature`, `top_p`, `stop`, `presence_penalty`, `frequency_penalty`
+- `tool_choice` support (`none`/`auto`/`required`/specific tool)
+- `stream_options` with `include_usage`
+- Tool validation (filter empty name/description)
+- Incremental streaming `tool_calls` (name + arguments in separate chunks)
+- `developer` role support
+- Model capabilities in `/v1/models` (vision + function_calling)
 
-## 快速开始
+#### 🔌 Anthropic Compatibility
+- System prompt as string or content blocks array
+- `tool_choice` conversion (`auto`/`any`/`tool`/`none`)
+- Image blocks (base64 + URL) → OpenAI `image_url` conversion
+- Thinking blocks passthrough
+- `stop_sequences` support
+- Proper SSE event sequence (`message_start` → `content_block_*` → `message_delta` → `message_stop`)
+- `input_json_delta` for streaming tool input
 
-```bash
-# 前置条件: kiro-cli 已登录 (kiro-cli login)
-cd ~/repos/kiro2chat
-uv sync
+#### 🏗️ Infrastructure
+- CORS middleware (allow all origins)
+- Global exception handlers (HTTP + unhandled)
+- `/health` endpoint for monitoring
+- systemd service template (`kiro2chat@.service`)
 
-uv run kiro2chat api      # API server (端口 8000, 4 workers)
-uv run kiro2chat webui     # Web UI (端口 7860)
-uv run kiro2chat bot       # Telegram Bot
-uv run kiro2chat all       # 全部一起启动
-```
+### v0.4.0 — Agent Integration
 
-## 配置
+- Strands Agent integration (LiteLLM + MCP tools)
+- Agent API endpoints (`/v1/agent/chat` stream + non-stream)
+- TG Bot via Agent layer
+- Built-in tools: calculator, file_read, file_write, http_request, shell
+- MCP config reuse from Kiro CLI (`~/.kiro/settings/mcp.json`)
 
-### 环境变量
+### v0.3.0 — Tool Calling
 
-| 变量 | 默认值 | 说明 |
-|---|---|---|
-| HOST | 0.0.0.0 | 服务绑定地址 |
-| PORT | 8000 | API 服务端口 |
-| KIRO_DB_PATH | ~/.local/share/kiro-cli/data.sqlite3 | kiro-cli 数据库路径 |
-| API_KEY | (无) | 可选的 API 认证密钥 |
-| TG_BOT_TOKEN | (无) | Telegram Bot Token |
-| LOG_LEVEL | info | 日志级别 |
+- OpenAI-compatible `tool_calls` support (stream + non-stream)
+- Tool role message passback to CodeWhisperer
 
-### 配置文件
+### v0.2.0 — Web UI
 
-- **系统配置**：`~/.config/kiro2chat/config.toml`（可通过 Web UI 编辑）
-- **MCP 工具**：`~/.kiro/settings/mcp.json`（复用 Kiro CLI 配置）
+- Gradio multi-page Web UI (Navbar)
+- System config page + monitoring dashboard
+- TOML config file management
+- Request statistics module
 
-## Changelog
+### v0.1.0 — Initial Release
 
-### v0.4.0
-- Strands Agent 集成（LiteLLM + MCP 工具）
-- Agent API endpoints（/v1/agent/chat 流式 + 非流式）
-- TG Bot 改为通过 Agent 层调用
-- 内置工具：calculator, file_read, file_write, http_request, shell
-- MCP 配置复用 Kiro CLI (~/.kiro/settings/mcp.json)
-
-### v0.3.0
-- OpenAI 兼容 API 完整 tool_calls 支持（流式 + 非流式）
-- tool role 消息回传 CodeWhisperer
-
-### v0.2.0
-- Gradio 多页面 Web UI (Navbar)
-- 系统配置页 + 监控面板
-- TOML 配置文件管理
-- 请求统计模块
-
-### v0.1.0
-- OpenAI 兼容 API (/v1/chat/completions, /v1/models)
-- kiro-cli token 自动刷新
-- 流式 + 非流式响应
+- OpenAI-compatible API (`/v1/chat/completions`, `/v1/models`)
+- kiro-cli token auto-refresh
+- Stream + non-stream responses
 - Telegram Bot
-- 基础 Gradio Web UI
+- Basic Gradio Web UI
 
-## License
+## 📄 License
 
 MIT

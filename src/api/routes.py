@@ -12,13 +12,13 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from ..config import config
 from ..core import TokenManager
 from ..core.client import CodeWhispererClient
+from ..core.sanitizer import sanitize_text, KIRO_BUILTIN_TOOLS
 from ..stats import stats
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1")
 
-# Shared instances (initialized in app lifespan)
 token_manager: TokenManager | None = None
 cw_client: CodeWhispererClient | None = None
 
@@ -30,18 +30,30 @@ def init_services(tm: TokenManager, cw: CodeWhispererClient):
 
 
 def _check_auth(authorization: str | None = None, x_api_key: str | None = None):
-    """Validate API key if configured."""
     if not config.api_key:
         return
-
     key = None
     if authorization and authorization.startswith("Bearer "):
         key = authorization[7:]
     elif x_api_key:
         key = x_api_key
-
     if key != config.api_key:
-        raise HTTPException(status_code=401, detail="Invalid API key")
+        raise HTTPException(status_code=401, detail={"error": {"message": "Invalid API key", "type": "authentication_error"}})
+
+
+def _is_valid_tool(tool: dict) -> bool:
+    """Check if a tool definition has required non-empty fields."""
+    fn = tool.get("function")
+    if fn and isinstance(fn, dict):
+        return bool(fn.get("name")) and bool(fn.get("description"))
+    if tool.get("name") and tool.get("description"):
+        return True
+    return False
+
+
+def _filter_valid_tools(tools: list[dict]) -> list[dict]:
+    """Filter out tools with empty/missing name or description."""
+    return [t for t in tools if _is_valid_tool(t)]
 
 
 @router.get("/models")
@@ -50,16 +62,14 @@ async def list_models(
     x_api_key: str | None = Header(None, alias="x-api-key"),
 ):
     _check_auth(authorization, x_api_key)
-
+    now = int(time.time())
     models = []
-    for model_name in config.model_map:
+    for name in config.model_map:
         models.append({
-            "id": model_name,
-            "object": "model",
-            "created": 1700000000,
-            "owned_by": "aws-kiro",
+            "id": name, "object": "model", "created": now, "owned_by": "anthropic",
+            "root": "claude-opus-4.6-1m", "parent": None,
+            "capabilities": {"vision": True, "function_calling": True},
         })
-
     return {"object": "list", "data": models}
 
 
@@ -72,138 +82,119 @@ async def chat_completions(
     _check_auth(authorization, x_api_key)
 
     body = await request.json()
-    logger.info(f"📥 chat_completions request: model={body.get('model')}, messages={len(body.get('messages', []))}, tools={len(body.get('tools', []) or [])}, stream={body.get('stream')}")
-    if body.get("tools"):
-        logger.info(f"📥 tools: {[t.get('function', {}).get('name', '?') for t in body['tools'][:10]]}")
     messages = body.get("messages", [])
     model = body.get("model", config.default_model)
     stream = body.get("stream", False)
     tools = body.get("tools")
+    tool_choice = body.get("tool_choice")
+    stream_options = body.get("stream_options") or {}
 
     if not messages:
-        raise HTTPException(status_code=400, detail="messages is required")
+        raise HTTPException(status_code=400, detail={"error": {"message": "messages is required"}})
 
-    if model not in config.model_map:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown model: {model}. Available: {list(config.model_map.keys())}",
-        )
+    # Filter and validate tools
+    if tools:
+        tools = _filter_valid_tools(tools)
+        # tool_choice=none means don't use tools
+        if tool_choice == "none":
+            tools = None
+            tool_choice = None
+        if not tools:
+            tools = None
+
+    logger.info(f"chat_completions: model={model}, messages={len(messages)}, tools={len(tools or [])}, stream={stream}")
 
     t0 = time.time()
     access_token = await token_manager.get_access_token()
     profile_arn = token_manager.profile_arn
 
+    # Build extra kwargs for converter (temperature, top_p, stop, etc.)
+    extra = {}
+    for key in ("temperature", "top_p", "stop", "presence_penalty", "frequency_penalty"):
+        if key in body and body[key] is not None:
+            extra[key] = body[key]
+
     if stream:
         return StreamingResponse(
-            _stream_response(access_token, messages, model, profile_arn, tools, t0),
+            _stream_response(access_token, messages, model, profile_arn, tools, t0,
+                             include_usage=stream_options.get("include_usage", False)),
             media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
         )
     else:
-        resp = await _non_stream_response(
-            access_token, messages, model, profile_arn, tools
-        )
-        latency = (time.time() - t0) * 1000
-        stats.record(model=model, latency_ms=latency, status="ok")
-        return resp
+        return await _non_stream_response(access_token, messages, model, profile_arn, tools, t0)
 
 
-def _make_chunk(chat_id: str, created: int, model: str, delta: dict, finish_reason: str | None = None) -> str:
-    """Build an SSE chunk string in OpenAI format."""
+def _make_chunk(chat_id: str, created: int, model: str, delta: dict,
+                finish_reason: str | None = None, usage: dict | None = None) -> str:
     chunk = {
-        "id": chat_id,
-        "object": "chat.completion.chunk",
-        "created": created,
-        "model": model,
-        "choices": [
-            {
-                "index": 0,
-                "delta": delta,
-                "finish_reason": finish_reason,
-            }
-        ],
+        "id": chat_id, "object": "chat.completion.chunk", "created": created, "model": model,
+        "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
     }
+    if usage is not None:
+        chunk["usage"] = usage
     return f"data: {json.dumps(chunk)}\n\n"
 
 
-def _build_tool_call_openai(index: int, tool_use_id: str, name: str, arguments: str) -> dict:
-    """Build an OpenAI-format tool_call object."""
-    return {
-        "index": index,
-        "id": tool_use_id,
-        "type": "function",
-        "function": {
-            "name": name,
-            "arguments": arguments,
-        },
-    }
-
-
 async def _stream_response(
-    access_token: str,
-    messages: list[dict],
-    model: str,
-    profile_arn: str,
-    tools: list[dict] | None,
-    t0: float = 0,
+    access_token: str, messages: list[dict], model: str, profile_arn: str,
+    tools: list[dict] | None, t0: float, include_usage: bool = False,
 ) -> AsyncIterator[str]:
-    """Generate SSE stream in OpenAI format with tool_calls support."""
     chat_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())
-    tool_calls_seen: list[dict] = []  # Track tool calls for finish_reason
+    tool_calls_seen: list[dict] = []
     tool_call_index = 0
 
     try:
         async for event in cw_client.generate_stream(
-            access_token=access_token,
-            messages=messages,
-            model=model,
-            profile_arn=profile_arn,
-            tools=tools,
+            access_token=access_token, messages=messages, model=model,
+            profile_arn=profile_arn, tools=tools,
         ):
             if event.event_type == "assistantResponseEvent":
                 content = event.payload.get("content", "")
                 if content:
-                    yield _make_chunk(chat_id, created, model, {"content": content})
+                    content = sanitize_text(content)
+                    if content:
+                        yield _make_chunk(chat_id, created, model, {"content": content})
 
             elif event.event_type == "toolUse":
-                # CodeWhisperer toolUse event -> OpenAI tool_calls chunk
                 payload = event.payload
+                name = payload.get("name", "")
+                if name in KIRO_BUILTIN_TOOLS:
+                    continue
+
                 tool_use_id = payload.get("toolUseId", f"call_{uuid.uuid4().hex[:24]}")
-                tool_name = payload.get("name", "")
                 tool_input = payload.get("input", {})
+                arguments = json.dumps(tool_input) if not isinstance(tool_input, str) else tool_input
 
-                # Convert input to JSON string
-                if isinstance(tool_input, str):
-                    arguments = tool_input
-                else:
-                    arguments = json.dumps(tool_input)
+                # Emit tool_calls in incremental chunks (name first, then arguments)
+                tc_base = {"index": tool_call_index, "id": tool_use_id, "type": "function",
+                           "function": {"name": name, "arguments": ""}}
+                yield _make_chunk(chat_id, created, model, {"tool_calls": [tc_base]})
 
-                tc = _build_tool_call_openai(tool_call_index, tool_use_id, tool_name, arguments)
-                tool_calls_seen.append(tc)
+                # Arguments in a separate chunk
+                tc_args = {"index": tool_call_index, "function": {"arguments": arguments}}
+                yield _make_chunk(chat_id, created, model, {"tool_calls": [tc_args]})
+
+                tool_calls_seen.append(name)
                 tool_call_index += 1
-
-                # Emit tool_calls delta chunk
-                yield _make_chunk(chat_id, created, model, {"tool_calls": [tc]})
 
             elif event.event_type == "supplementaryWebLinksEvent":
                 pass
 
             elif event.event_type == "exception":
                 error_msg = event.payload.get("message", str(event.payload))
-                yield _make_chunk(
-                    chat_id, created, model,
-                    {"content": f"\n\n[Error: {error_msg}]"},
-                    finish_reason="stop",
-                )
+                yield _make_chunk(chat_id, created, model, {"content": f"\n\n[Error: {error_msg}]"}, finish_reason="stop")
 
-        # Final chunk: finish_reason depends on whether tools were called
         finish_reason = "tool_calls" if tool_calls_seen else "stop"
         yield _make_chunk(chat_id, created, model, {}, finish_reason=finish_reason)
+
+        # Usage chunk if requested
+        if include_usage:
+            yield _make_chunk(chat_id, created, model, {}, usage={
+                "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+            })
+
         yield "data: [DONE]\n\n"
         stats.record(model=model, latency_ms=(time.time() - t0) * 1000, status="ok")
 
@@ -215,13 +206,9 @@ async def _stream_response(
 
 
 async def _non_stream_response(
-    access_token: str,
-    messages: list[dict],
-    model: str,
-    profile_arn: str,
-    tools: list[dict] | None,
+    access_token: str, messages: list[dict], model: str, profile_arn: str,
+    tools: list[dict] | None, t0: float,
 ) -> JSONResponse:
-    """Collect full response and return as single JSON, including tool_calls."""
     chat_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())
     text_parts: list[str] = []
@@ -229,60 +216,42 @@ async def _non_stream_response(
     tool_call_index = 0
 
     async for event in cw_client.generate_stream(
-        access_token=access_token,
-        messages=messages,
-        model=model,
-        profile_arn=profile_arn,
-        tools=tools,
+        access_token=access_token, messages=messages, model=model,
+        profile_arn=profile_arn, tools=tools,
     ):
         if event.event_type == "assistantResponseEvent":
             content = event.payload.get("content", "")
             if content:
                 text_parts.append(content)
-
         elif event.event_type == "toolUse":
             payload = event.payload
-            tool_use_id = payload.get("toolUseId", f"call_{uuid.uuid4().hex[:24]}")
-            tool_name = payload.get("name", "")
+            name = payload.get("name", "")
+            if name in KIRO_BUILTIN_TOOLS:
+                continue
             tool_input = payload.get("input", {})
-
-            if isinstance(tool_input, str):
-                arguments = tool_input
-            else:
-                arguments = json.dumps(tool_input)
-
-            tool_calls.append(_build_tool_call_openai(tool_call_index, tool_use_id, tool_name, arguments))
+            arguments = json.dumps(tool_input) if not isinstance(tool_input, str) else tool_input
+            tool_calls.append({
+                "index": tool_call_index,
+                "id": payload.get("toolUseId", f"call_{uuid.uuid4().hex[:24]}"),
+                "type": "function",
+                "function": {"name": name, "arguments": arguments},
+            })
             tool_call_index += 1
-
         elif event.event_type == "exception":
-            error_msg = event.payload.get("message", str(event.payload))
-            raise HTTPException(status_code=502, detail=f"CodeWhisperer error: {error_msg}")
+            raise HTTPException(status_code=502, detail={"error": {"message": event.payload.get("message", ""), "type": "upstream_error"}})
 
-    full_text = "".join(text_parts)
+    full_text = sanitize_text("".join(text_parts))
     finish_reason = "tool_calls" if tool_calls else "stop"
 
-    message: dict = {
-        "role": "assistant",
-        "content": full_text or None,
-    }
+    message: dict = {"role": "assistant", "content": full_text or None}
     if tool_calls:
         message["tool_calls"] = tool_calls
 
+    latency = (time.time() - t0) * 1000
+    stats.record(model=model, latency_ms=latency, status="ok")
+
     return JSONResponse({
-        "id": chat_id,
-        "object": "chat.completion",
-        "created": created,
-        "model": model,
-        "choices": [
-            {
-                "index": 0,
-                "message": message,
-                "finish_reason": finish_reason,
-            }
-        ],
-        "usage": {
-            "prompt_tokens": -1,
-            "completion_tokens": -1,
-            "total_tokens": -1,
-        },
+        "id": chat_id, "object": "chat.completion", "created": created, "model": model,
+        "choices": [{"index": 0, "message": message, "finish_reason": finish_reason}],
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
     })

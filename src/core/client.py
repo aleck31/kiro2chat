@@ -49,6 +49,7 @@ class CodeWhispererClient:
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {access_token}",
                 "x-amzn-codewhisperer-optout": "true",
+                "User-Agent": "aws-sdk-js/3.738.0 ua/2.1 os/other lang/js md/browser#unknown_unknown api/codewhisperer#3.738.0 m/E KiroIDE",
             },
         ) as response:
             if response.status_code != 200:

@@ -85,7 +85,7 @@ x-amzn-codewhisperer-optout: true
       }
     ]
   },
-  "profileArn": "arn:aws:codewhisperer:us-east-1:222829864634:profile/NGQVMVC74C7X"
+  "profileArn": "arn:aws:codewhisperer:us-east-1:XXXXXXXXXXXX:profile/XXXXXXXXXXXX"
 }
 ```
 

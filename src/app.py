@@ -6,7 +6,7 @@ import sys
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 from . import __version__
 from .config import config
@@ -14,6 +14,7 @@ from .core import TokenManager
 from .core.client import CodeWhispererClient
 from .api.routes import router, init_services
 from .api.agent_routes import router as agent_router, init_agent_routes
+from .api.anthropic_routes import router as anthropic_router, init_anthropic_routes
 
 # Configure logging
 logging.basicConfig(
@@ -22,13 +23,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Module-level refs for health check
+token_manager: "TokenManager | None" = None
+cw_client: "CodeWhispererClient | None" = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan: init and cleanup."""
+    global token_manager, cw_client
     tm = TokenManager()
     cw = CodeWhispererClient()
+    token_manager = tm
+    cw_client = cw
     init_services(tm, cw)
+    init_anthropic_routes(tm, cw)
 
     try:
         token = await tm.get_access_token()
@@ -62,13 +71,38 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="kiro2chat",
-    description="Kiro to Chat - OpenAI-compatible API powered by Kiro/CodeWhisperer",
+    description="Kiro to Chat - OpenAI & Anthropic compatible API Gateway",
     version=__version__,
     lifespan=lifespan,
 )
 
+# CORS
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(router)
 app.include_router(agent_router)
+app.include_router(anthropic_router)
+
+
+# Global exception handlers
+from fastapi.responses import JSONResponse as _JSONResponse
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc):
+    detail = exc.detail if isinstance(exc.detail, dict) else {"error": {"message": str(exc.detail)}}
+    return _JSONResponse(status_code=exc.status_code, content=detail)
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request, exc):
+    logger.exception("Unhandled exception")
+    return _JSONResponse(status_code=500, content={"error": {"message": "Internal server error", "type": "internal_error"}})
 
 
 @app.get("/")
@@ -77,13 +111,23 @@ async def root():
         "name": "kiro2chat",
         "version": __version__,
         "status": "running",
+        "backend_model": "claude-opus-4.6-1m",
         "endpoints": {
-            "models": "/v1/models",
-            "chat": "/v1/chat/completions",
+            "openai_chat": "/v1/chat/completions",
+            "openai_models": "/v1/models",
+            "anthropic_messages": "/v1/messages",
             "agent_chat": "/v1/agent/chat",
             "agent_tools": "/v1/agent/tools",
+            "health": "/health",
         },
     }
+
+
+@app.get("/health")
+async def health():
+    """Health check endpoint for monitoring and load balancers."""
+    from .core.health import check_health
+    return await check_health(token_manager, cw_client)
 
 
 def run_api():
