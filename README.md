@@ -368,7 +368,15 @@ kiro2chat/src/
 
 **[Aleck](https://github.com/aleck)** designed the core architecture — CodeWhisperer protocol reverse engineering, EventStream binary parser, and kiro-cli token management.
 
-**[Neo](https://github.com/neosun100)** extended the project with full OpenAI + Anthropic API compatibility, system prompt sanitization, MCP tool calling support, and production deployment.
+**[Neo](https://github.com/neosun100)** extended the project into a production-ready API Gateway:
+- Full OpenAI + Anthropic dual-protocol compatibility
+- Three-layer system prompt sanitization (28/28 adversarial tests pass)
+- MCP tool calling with `toolUseEvent` streaming aggregation
+- Image support (OpenAI `image_url` + Anthropic `image` blocks)
+- Accurate token counting via tiktoken
+- Nginx optimization for long-running SSE streams
+- systemd production deployment
+- Bilingual documentation (EN/CN)
 
 We welcome contributions from the community! Whether it's bug fixes, new features, documentation improvements, or test cases — all contributions are appreciated.
 

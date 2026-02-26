@@ -377,7 +377,15 @@ kiro2chat/src/
 
 **[Aleck](https://github.com/aleck)** 设计了核心架构——CodeWhisperer 协议逆向工程、EventStream 二进制解析器和 kiro-cli Token 管理。
 
-**[Neo](https://github.com/neosun100)** 在此基础上扩展了完整的 OpenAI + Anthropic API 兼容性、系统提示词清洗、MCP 工具调用支持和生产部署功能。
+**[Neo](https://github.com/neosun100)** 在此基础上将项目扩展为生产级 API 网关：
+- 完整的 OpenAI + Anthropic 双协议兼容
+- 三层系统提示词清洗（28/28 对抗性测试通过）
+- MCP 工具调用，支持 `toolUseEvent` 流式聚合
+- 图片支持（OpenAI `image_url` + Anthropic `image` blocks）
+- 基于 tiktoken 的精确 token 计数
+- Nginx 长连接 SSE 流式优化
+- systemd 生产部署
+- 双语文档（中文/英文）
 
 我们欢迎社区贡献！无论是 Bug 修复、新功能、文档改进还是测试用例——所有贡献都受到感谢。
 
