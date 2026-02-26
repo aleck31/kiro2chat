@@ -19,10 +19,26 @@ from .api.routes import router, init_services
 from .api.agent_routes import router as agent_router, init_agent_routes
 from .api.anthropic_routes import router as anthropic_router, init_anthropic_routes
 
-# Configure logging
+# Configure logging (JSON structured for production)
+import json as _json_mod
+
+class JSONFormatter(logging.Formatter):
+    def format(self, record):
+        log = {
+            "ts": self.formatTime(record),
+            "level": record.levelname,
+            "logger": record.name,
+            "msg": record.getMessage(),
+        }
+        if record.exc_info and record.exc_info[0]:
+            log["exception"] = self.formatException(record.exc_info)
+        return _json_mod.dumps(log, ensure_ascii=False)
+
+_handler = logging.StreamHandler()
+_handler.setFormatter(JSONFormatter())
 logging.basicConfig(
     level=getattr(logging, config.log_level.upper(), logging.INFO),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[_handler],
 )
 logger = logging.getLogger(__name__)
 
@@ -94,13 +110,36 @@ app.include_router(agent_router)
 app.include_router(anthropic_router)
 
 
-# Request ID middleware
+# Request ID + Metrics middleware
+from .metrics import REQUEST_COUNT, REQUEST_LATENCY, ACTIVE_REQUESTS, SERVICE_INFO, get_metrics, get_content_type
+import time as _time
+
+SERVICE_INFO.info({"version": __version__, "backend": "claude-opus-4.6-1m"})
+
 @app.middleware("http")
-async def add_request_id(request: Request, call_next):
+async def metrics_middleware(request: Request, call_next):
     request_id = request.headers.get("x-request-id", str(uuid.uuid4())[:8])
-    response = await call_next(request)
-    response.headers["x-request-id"] = request_id
-    return response
+    ACTIVE_REQUESTS.inc()
+    start = _time.time()
+    try:
+        response = await call_next(request)
+        REQUEST_COUNT.labels(
+            endpoint=request.url.path, method=request.method, status=response.status_code,
+        ).inc()
+        REQUEST_LATENCY.labels(endpoint=request.url.path).observe(_time.time() - start)
+        response.headers["x-request-id"] = request_id
+        return response
+    except Exception:
+        REQUEST_COUNT.labels(endpoint=request.url.path, method=request.method, status=500).inc()
+        raise
+    finally:
+        ACTIVE_REQUESTS.dec()
+
+
+@app.get("/metrics")
+async def prometheus_metrics():
+    from fastapi.responses import Response
+    return Response(content=get_metrics(), media_type=get_content_type())
 
 
 # Global exception handlers

@@ -15,6 +15,7 @@ from ..core.client import CodeWhispererClient
 from ..core.sanitizer import sanitize_text, KIRO_BUILTIN_TOOLS
 from ..core.token_counter import estimate_tokens, estimate_messages_tokens
 from ..stats import stats
+from ..metrics import TOKENS_INPUT, TOKENS_OUTPUT, TOOL_CALLS, ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -312,6 +313,8 @@ async def _non_stream_response(
 
     latency = (time.time() - t0) * 1000
     stats.record(model=model, latency_ms=latency, status="ok")
+    TOKENS_INPUT.inc(prompt_tokens)
+    TOKENS_OUTPUT.inc(completion_tokens)
 
     return JSONResponse({
         "id": chat_id, "object": "chat.completion", "created": created, "model": model,

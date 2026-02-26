@@ -70,6 +70,8 @@ class CodeWhispererClient:
                     if response.status_code >= 500 and attempt < MAX_RETRIES - 1:
                         delay = RETRY_BACKOFF[min(attempt, len(RETRY_BACKOFF) - 1)]
                         logger.warning(f"CW {response.status_code}, retry {attempt+1}/{MAX_RETRIES} in {delay}s")
+                        from ..metrics import CW_RETRIES
+                        CW_RETRIES.inc()
                         await asyncio.sleep(delay)
                         last_error = RuntimeError(f"CodeWhisperer API error: {response.status_code} {error_text}")
                         continue
