@@ -9,7 +9,7 @@
   ![Python](https://img.shields.io/badge/python-≥3.13-blue?logo=python&logoColor=white)
   ![FastAPI](https://img.shields.io/badge/FastAPI-0.129+-green?logo=fastapi&logoColor=white)
   ![License](https://img.shields.io/badge/license-MIT-blue)
-  ![Version](https://img.shields.io/badge/version-1.0.0-purple)
+  ![Version](https://img.shields.io/badge/version-1.1.0-purple)
 </div>
 
 ---
@@ -280,6 +280,16 @@ kiro2chat/src/
 | Python | ≥ 3.13 |
 
 ## 📝 Changelog
+
+### v1.1.0 — Security & Stability (2026-02-27)
+
+#### 🔒 Security
+- Removed profile ARN exposure from `/health` endpoint
+- API key moved to `EnvironmentFile` with 600 permissions (out of systemd unit)
+
+#### 🔧 Stability
+- **Graceful shutdown** — `KillSignal=SIGINT` + `TimeoutStopSec=60` prevents request interruption during restarts
+- systemd service hardened for production long-running requests
 
 ### v1.0.0 — Production Release (2026-02-27)
 

@@ -9,7 +9,7 @@
   ![Python](https://img.shields.io/badge/python-≥3.13-blue?logo=python&logoColor=white)
   ![FastAPI](https://img.shields.io/badge/FastAPI-0.129+-green?logo=fastapi&logoColor=white)
   ![License](https://img.shields.io/badge/license-MIT-blue)
-  ![Version](https://img.shields.io/badge/version-1.0.0-purple)
+  ![Version](https://img.shields.io/badge/version-1.1.0-purple)
 </div>
 
 ---
@@ -272,6 +272,16 @@ kiro2chat/src/
 ```
 
 ## 📝 更新日志
+
+### v1.1.0 — 安全 & 稳定性 (2026-02-27)
+
+#### 🔒 安全
+- 移除 `/health` 端点中的 profile ARN 暴露
+- API key 移至 `EnvironmentFile`，600 权限保护（不再写在 systemd 单元文件中）
+
+#### 🔧 稳定性
+- **优雅关闭** — `KillSignal=SIGINT` + `TimeoutStopSec=60`，重启时不中断进行中的请求
+- systemd 服务针对生产环境长时间请求加固
 
 ### v1.0.0 — 正式发布 (2026-02-27)
 
