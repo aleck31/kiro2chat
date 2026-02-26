@@ -114,6 +114,7 @@ async def _stream_agent_sse(message: str) -> AsyncIterator[str]:
                 agent_result = event["result"]
                 stop_reason = getattr(agent_result, "stop_reason", "end_turn")
                 latency_ms = (time.time() - t0) * 1000
+                logger.info(f"🤖 Agent response: stop={stop_reason}, tools_used={[t['name'] for t in tool_uses]}, text_len={len(text_buffer)}, latency={latency_ms:.0f}ms")
 
                 sse = json.dumps({
                     "type": "done",
@@ -224,21 +225,18 @@ async def reload_tools():
     _mcp_config = load_mcp_config()
     _mcp_clients = create_mcp_clients(_mcp_config)
 
-    tools = []
+    total_tools = 0
     for client in _mcp_clients:
         try:
             client.start()
-            tools.extend(client.list_tools_sync())
+            total_tools += len(client.list_tools_sync())
         except Exception as e:
             logger.error(f"Failed to start MCP client on reload: {e}")
-
-    if _agent is not None:
-        _agent.tool_registry.process_tools(tools)
 
     _loaded_mcp_tools = _snapshot_loaded_tools(_mcp_config, _mcp_clients)
 
     return {
         "status": "ok",
         "servers": list(_mcp_config.get("mcpServers", {}).keys()),
-        "tool_count": len(tools),
+        "tool_count": total_tools,
     }

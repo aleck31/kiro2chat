@@ -94,6 +94,7 @@ kiro2chat/src/
 
 ### Telegram Bot (`bot/telegram.py`)
 - 通过 `/v1/agent/chat` 流式调用 Strands Agent
+- 实时显示工具调用状态（`🔧 tool_name: brief_input...`）
 - 会话隔离：session key = `(chat_id, user_id)`
 - 每会话 asyncio.Lock 防止消息乱序
 - 命令：`/model`, `/tools`, `/clear`, `/help`
@@ -101,10 +102,10 @@ kiro2chat/src/
 - 最大历史 20 条消息
 
 ### Web UI (`webui.py`)
-- **聊天页**：模型选择 + 工具列表 + ChatInterface（通过 /v1/agent/chat 调用 Strands Agent）
+- **聊天页**：模型选择（默认 `config.default_model`）+ 工具列表 + ChatInterface
+  - 流式 SSE 渲染，实时显示 `🔧 工具名: 参数...` 进度状态
 - **系统配置页**：可视化编辑所有配置项，保存到 `~/.config/kiro2chat/config.toml`
 - **监控面板**：请求统计、延迟、错误率、最近请求日志（5s 自动刷新）
-- **Agent 页**：通过 Strands Agent 聊天 + MCP 配置编辑
 
 ### 配置 (`config.py` + `config_manager.py`)
 - 优先级：环境变量 > `~/.config/kiro2chat/config.toml` > 默认值
@@ -144,6 +145,15 @@ uv run kiro2chat all       # 全部一起启动
 
 ## Changelog
 
+### v0.6.0
+- 修复 `toolUseEvent` 解析：Kiro 流式分块传输工具调用输入，累积 `input_chunks` 至 `stop=True` 后组装完整 tool_call
+- 新增 `_accumulate_tool_use_event()` 处理多块 tool input，替换原错误的 `toolUse` 事件处理
+- 修复 shell 工具阻塞：添加 `STRANDS_NON_INTERACTIVE=true` 环境变量，禁用 PTY 和交互确认
+- 修复 AWS CLI pager 阻塞：`.env` 添加 `AWS_PAGER=`，子进程继承空值禁用 `less`
+- TG Bot 工具调用实时状态：`tool_start` 事件显示 `🔧 name: brief_input...`，`_brief_tool_input()` 按工具类型提取关键参数
+- WebUI 聊天改为流式 SSE：`agent_chat_fn` 从阻塞 `httpx.post` 改为 generator + `httpx.stream`，实时渲染工具使用进度
+- 修复 `/v1/agent/reload` 500 错误：移除不适用的 `tool_registry.process_tools()` 调用，reload 仅重启 MCP 连接
+
 ### v0.5.0
 - 修复 Agent 自回环死锁：非流式路径改用 `await invoke_async()`，移除多 worker
 - Agent /chat 支持 per-request 切换模型
@@ -151,9 +161,6 @@ uv run kiro2chat all       # 全部一起启动
 - 跳过 http/sse 类型 MCP server（不再崩溃）
 - 修复 `mcp.client.stdio` 与 gradio 的循环导入死锁
 - Telegram bot 模型列表改为从 `/v1/models` 动态获取
-- 精简 Kiro 请求日志（摘要替代全量 body）
-- 补全 model_map 验证状态，修正 sonnet-4-6 ID（`claude-sonnet-4.6`）
-- 新增 `devguide/ARCHITECTURE.md` 架构设计文档
 
 ### v0.4.0
 - Strands Agent 集成（OpenAIModel 自回环 + MCP 工具）

@@ -215,6 +215,7 @@ def _get_tools_display() -> str:
 
 def create_ui() -> gr.Blocks:
     models = get_models()
+    default_model = config.default_model if config.default_model in models else (models[0] if models else "")
 
     # ---- Kiro Chat Home Page ----
     with gr.Blocks(title="kiro2chat") as demo:
@@ -222,29 +223,82 @@ def create_ui() -> gr.Blocks:
         gr.Markdown("# 🤖 kiro2chat\nChat with Kiro (with MCP tools)")
 
         # Hidden state to bridge model dropdown (rendered below) into ChatInterface
-        model_state = gr.State(value=models[0] if models else "")
+        model_state = gr.State(value=default_model)
 
         def agent_chat_fn(message: str, history: list[dict], model: str):
-            try:
-                resp = httpx.post(
-                    f"{API_BASE}/v1/agent/chat",
-                    json={"message": message, "model": model},
-                    timeout=120,
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                content = data.get("content", "")
-                tool_uses = data.get("tool_uses", [])
+            def _brief(name: str, inp) -> str:
+                if isinstance(inp, str):
+                    try:
+                        inp = json.loads(inp)
+                    except Exception:
+                        return inp[:80]
+                if not isinstance(inp, dict):
+                    return str(inp)[:80]
+                if name == "shell":
+                    cmd = inp.get("command", "")
+                    if isinstance(cmd, list):
+                        cmd = cmd[0] if cmd else ""
+                    return f"`{str(cmd)[:80]}`"
+                if name in ("file_read", "file_write"):
+                    return f"`{inp.get('path', '')}`"
+                if name == "calculator":
+                    return f"`{inp.get('expression', '')}`"
+                if name == "http_request":
+                    return f"{inp.get('method', 'GET')} {inp.get('url', '')[:60]}"
+                if inp:
+                    k, v = next(iter(inp.items()))
+                    return f"{k}={str(v)[:40]}"
+                return ""
 
-                reply = content
-                if tool_uses:
-                    tool_info = "\n\n---\n🔧 **Tools used:** " + ", ".join(
-                        t["name"] for t in tool_uses
-                    )
-                    reply += tool_info
-                return reply
+            try:
+                full_text = ""
+                tool_status = ""
+
+                with httpx.stream(
+                    "POST",
+                    f"{API_BASE}/v1/agent/chat",
+                    json={"message": message, "model": model, "stream": True},
+                    timeout=120,
+                ) as resp:
+                    resp.raise_for_status()
+                    for line in resp.iter_lines():
+                        if not line.startswith("data: "):
+                            continue
+                        data_str = line[6:]
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            event = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
+
+                        evt_type = event.get("type", "")
+
+                        if evt_type == "data":
+                            full_text += event.get("content", "")
+                            tool_status = ""
+                            yield full_text
+
+                        elif evt_type == "tool_start":
+                            name = event.get("name", "")
+                            inp = event.get("input", {})
+                            brief = _brief(name, inp)
+                            tool_status = f"🔧 *{name}*" + (f": {brief}" if brief else "") + "..."
+                            prefix = full_text + "\n\n" if full_text else ""
+                            yield prefix + tool_status
+
+                        elif evt_type == "tool_end":
+                            tool_status = ""
+                            if full_text:
+                                yield full_text
+
+                        elif evt_type == "error":
+                            prefix = full_text + "\n\n" if full_text else ""
+                            yield prefix + f"❌ {event.get('message', 'Unknown error')}"
+                            return
+
             except Exception as e:
-                return f"❌ Error: {e}"
+                yield f"❌ Error: {e}"
 
         gr.ChatInterface(
             fn=agent_chat_fn,
@@ -255,7 +309,7 @@ def create_ui() -> gr.Blocks:
         with gr.Row():
             model_dd = gr.Dropdown(
                 choices=models,
-                value=models[0] if models else None,
+                value=default_model or None,
                 label="模型选择",
                 interactive=True,
                 scale=3,

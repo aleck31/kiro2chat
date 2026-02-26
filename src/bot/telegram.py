@@ -55,16 +55,44 @@ def _clean_response(text: str) -> str:
     return text.strip()
 
 
+def _brief_tool_input(name: str, inp) -> str:
+    """Return a short one-line summary of tool input for status display."""
+    if isinstance(inp, str):
+        try:
+            inp = __import__("json").loads(inp)
+        except Exception:
+            return inp[:80]
+    if not isinstance(inp, dict):
+        return str(inp)[:80]
+    if name == "shell":
+        cmd = inp.get("command", "")
+        if isinstance(cmd, list):
+            cmd = cmd[0] if cmd else ""
+        return f"`{str(cmd)[:80]}`"
+    if name in ("file_read", "file_write"):
+        return f"`{inp.get('path', '')}`"
+    if name == "calculator":
+        return f"`{inp.get('expression', '')}`"
+    if name in ("web_search_exa", "get_code_context_exa"):
+        return inp.get("query", "")[:60]
+    if name == "company_research_exa":
+        return inp.get("companyName", "")[:60]
+    if name == "http_request":
+        return f"{inp.get('method','GET')} {inp.get('url','')[:60]}"
+    # Generic: show first key=value
+    if inp:
+        k, v = next(iter(inp.items()))
+        return f"{k}={str(v)[:40]}"
+    return ""
+
+
 def _format_tool_uses(tool_uses: list[dict]) -> str:
     """Format agent tool uses into a readable summary."""
     parts = []
     for tu in tool_uses:
         name = tu.get("name", "unknown")
-        inp = tu.get("input", {})
-        args_short = ", ".join(f"{k}={v!r}" for k, v in list(inp.items())[:3])
-        if len(inp) > 3:
-            args_short += ", ..."
-        parts.append(f"🔧 {name}({args_short})")
+        brief = _brief_tool_input(name, tu.get("input", {}))
+        parts.append(f"🔧 {name}" + (f"  {brief}" if brief else ""))
     return "\n".join(parts)
 
 
@@ -140,7 +168,7 @@ async def cmd_model(message: Message):
     args = (message.text or "").split(maxsplit=1)
 
     if len(args) < 2:
-        current = session_models.get(key, "claude-sonnet-4-5")
+        current = session_models.get(key, "claude-sonnet-4-6 (Krio)")
         models = _get_models()
         model_list = "\n".join(f"• `{m}`" for m in models)
         await message.answer(
@@ -173,7 +201,7 @@ async def handle_message(message: Message):
     async with lock:
         reply = await message.answer("⏳ Thinking...")
 
-        _add_to_history(key, "user", message.text)
+        _add_to_history(key, "user", message.text or "")
 
         full_text = ""
         tool_uses: list[dict] = []
@@ -185,7 +213,7 @@ async def handle_message(message: Message):
                 async with client.stream(
                     "POST",
                     f"{API_BASE}/v1/agent/chat",
-                    json={"message": message.text, "stream": True},
+                    json={"message": message.text, "stream": True, "model": session_models.get(key)},
                 ) as resp:
                     resp.raise_for_status()
                     async for line in resp.aiter_lines():
@@ -214,12 +242,11 @@ async def handle_message(message: Message):
                                         pass
 
                         elif evt_type == "tool_start":
-                            tool_uses.append({
-                                "name": event.get("name", ""),
-                                "input": event.get("input", {}),
-                            })
-                            # Show tool usage in real-time
-                            tool_line = f"🔧 Using {event.get('name', '')}..."
+                            name = event.get("name", "")
+                            inp = event.get("input", {})
+                            tool_uses.append({"name": name, "input": inp})
+                            brief = _brief_tool_input(name, inp)
+                            tool_line = f"🔧 {name}: {brief}..." if brief else f"🔧 {name}..."
                             current = _clean_response(full_text)
                             preview = f"{current}\n\n{tool_line}" if current else tool_line
                             try:

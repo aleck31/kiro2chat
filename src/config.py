@@ -78,7 +78,7 @@ class Config:
     })
 
     # Default model when client doesn't specify
-    default_model: str = _get("default_model", "DEFAULT_MODEL") or "claude-sonnet-4-5"
+    default_model: str = _get("default_model", "DEFAULT_MODEL") or "claude-sonnet-4-6 (Krio)"
 
 
 config = Config()

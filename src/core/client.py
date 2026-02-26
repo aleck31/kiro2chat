@@ -42,7 +42,7 @@ class KiroClient:
         _cur = _cs.get("currentMessage", {}).get("userInputMessage", {})
         _tools = _cur.get("userInputMessageContext", {}).get("tools", [])
         _tool_names = [t.get("toolSpecification", {}).get("name") for t in _tools]
-        logger.info(
+        logger.debug(
             f"📤 Kiro request: model={_cur.get('modelId')}, "
             f"tools={len(_tools)}{_tool_names}, "
             f"history={len(_cs.get('history', []))}, "

@@ -20,6 +20,9 @@ logging.basicConfig(
     level=getattr(logging, config.log_level.upper(), logging.INFO),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+# Suppress overly verbose third-party debug logs
+logging.getLogger("strands.models.openai").setLevel(logging.INFO)   # drops "formatted request" dump
+logging.getLogger("strands.tools.registry").setLevel(logging.WARNING)  # drops per-tool "loaded tool config" x30
 logger = logging.getLogger(__name__)
 
 

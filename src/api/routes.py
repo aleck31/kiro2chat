@@ -73,8 +73,6 @@ async def chat_completions(
 
     body = await request.json()
     logger.info(f"📥 chat_completions request: model={body.get('model')}, messages={len(body.get('messages', []))}, tools={len(body.get('tools', []) or [])}, stream={body.get('stream')}")
-    if body.get("tools"):
-        logger.info(f"📥 tools: {[t.get('function', {}).get('name', '?') for t in body['tools'][:10]]}")
     messages = body.get("messages", [])
     model = body.get("model", config.default_model)
     stream = body.get("stream", False)
@@ -143,6 +141,32 @@ def _build_tool_call_openai(index: int, tool_use_id: str, name: str, arguments: 
     }
 
 
+def _accumulate_tool_use_event(
+    buffers: dict,
+    payload: dict,
+    tool_call_index: int,
+) -> dict | None:
+    """Accumulate streaming toolUseEvent chunks; return completed tool call when stop=True."""
+    tool_use_id = payload.get("toolUseId", "")
+    tool_name = payload.get("name", "")
+    input_chunk = payload.get("input", "")
+    is_stop = payload.get("stop", False)
+
+    if tool_use_id not in buffers:
+        buffers[tool_use_id] = {"name": tool_name, "input_chunks": [], "index": tool_call_index}
+
+    if input_chunk:
+        buffers[tool_use_id]["input_chunks"].append(input_chunk)
+
+    if is_stop:
+        buf = buffers.pop(tool_use_id)
+        arguments = "".join(buf["input_chunks"])
+        name = buf["name"] or tool_name
+        return _build_tool_call_openai(buf["index"], tool_use_id, name, arguments)
+
+    return None
+
+
 async def _stream_response(
     access_token: str,
     messages: list[dict],
@@ -154,8 +178,9 @@ async def _stream_response(
     """Generate SSE stream in OpenAI format with tool_calls support."""
     chat_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())
-    tool_calls_seen: list[dict] = []  # Track tool calls for finish_reason
+    tool_calls_seen: list[dict] = []
     tool_call_index = 0
+    tool_use_buffers: dict = {}  # toolUseId -> {name, input_chunks, index}
 
     try:
         async for event in kiro_client.generate_stream(
@@ -170,27 +195,15 @@ async def _stream_response(
                 if content:
                     yield _make_chunk(chat_id, created, model, {"content": content})
 
-            elif event.event_type == "toolUse":
-                # Kiro toolUse event -> OpenAI tool_calls chunk
-                payload = event.payload
-                tool_use_id = payload.get("toolUseId", f"call_{uuid.uuid4().hex[:24]}")
-                tool_name = payload.get("name", "")
-                tool_input = payload.get("input", {})
+            elif event.event_type == "toolUseEvent":
+                # Kiro streams tool calls incrementally; accumulate until stop=True
+                tc = _accumulate_tool_use_event(tool_use_buffers, event.payload, tool_call_index)
+                if tc is not None:
+                    tool_calls_seen.append(tc)
+                    tool_call_index += 1
+                    yield _make_chunk(chat_id, created, model, {"tool_calls": [tc]})
 
-                # Convert input to JSON string
-                if isinstance(tool_input, str):
-                    arguments = tool_input
-                else:
-                    arguments = json.dumps(tool_input)
-
-                tc = _build_tool_call_openai(tool_call_index, tool_use_id, tool_name, arguments)
-                tool_calls_seen.append(tc)
-                tool_call_index += 1
-
-                # Emit tool_calls delta chunk
-                yield _make_chunk(chat_id, created, model, {"tool_calls": [tc]})
-
-            elif event.event_type == "supplementaryWebLinksEvent":
+            elif event.event_type in ("supplementaryWebLinksEvent", "contextUsageEvent"):
                 pass
 
             elif event.event_type == "exception":
@@ -201,11 +214,16 @@ async def _stream_response(
                     finish_reason="stop",
                 )
 
+            else:
+                logger.debug(f"🔍 Unhandled Kiro event: type={event.event_type!r}, payload={str(event.payload)[:200]}")
+
         # Final chunk: finish_reason depends on whether tools were called
         finish_reason = "tool_calls" if tool_calls_seen else "stop"
+        latency_ms = (time.time() - t0) * 1000
+        logger.info(f"📥 chat_completions response: finish={finish_reason}, tool_calls={len(tool_calls_seen)}, latency={latency_ms:.0f}ms")
         yield _make_chunk(chat_id, created, model, {}, finish_reason=finish_reason)
         yield "data: [DONE]\n\n"
-        stats.record(model=model, latency_ms=(time.time() - t0) * 1000, status="ok")
+        stats.record(model=model, latency_ms=latency_ms, status="ok")
 
     except Exception as e:
         logger.error(f"Stream error: {e}")
@@ -227,6 +245,7 @@ async def _non_stream_response(
     text_parts: list[str] = []
     tool_calls: list[dict] = []
     tool_call_index = 0
+    tool_use_buffers: dict = {}
 
     async for event in kiro_client.generate_stream(
         access_token=access_token,
@@ -240,19 +259,11 @@ async def _non_stream_response(
             if content:
                 text_parts.append(content)
 
-        elif event.event_type == "toolUse":
-            payload = event.payload
-            tool_use_id = payload.get("toolUseId", f"call_{uuid.uuid4().hex[:24]}")
-            tool_name = payload.get("name", "")
-            tool_input = payload.get("input", {})
-
-            if isinstance(tool_input, str):
-                arguments = tool_input
-            else:
-                arguments = json.dumps(tool_input)
-
-            tool_calls.append(_build_tool_call_openai(tool_call_index, tool_use_id, tool_name, arguments))
-            tool_call_index += 1
+        elif event.event_type == "toolUseEvent":
+            tc = _accumulate_tool_use_event(tool_use_buffers, event.payload, tool_call_index)
+            if tc is not None:
+                tool_calls.append(tc)
+                tool_call_index += 1
 
         elif event.event_type == "exception":
             error_msg = event.payload.get("message", str(event.payload))
