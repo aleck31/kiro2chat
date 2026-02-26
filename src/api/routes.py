@@ -241,8 +241,8 @@ async def _stream_response(
             # Build continuation request with accumulated text as history
             cont_messages = [
                 {"role": "user", "content": current_messages[0].get("content", "") if current_messages else ""},
-                {"role": "assistant", "content": stream_text_buf[-3000:]},
-                {"role": "user", "content": "Continue exactly from where you stopped. Do not repeat any content."},
+                {"role": "assistant", "content": stream_text_buf[-4000:]},
+                {"role": "user", "content": "Your previous output was cut off mid-stream. Continue EXACTLY from the last character. Do not repeat anything. Do not add commentary. Just continue the code/text output until it is complete."},
             ]
             # Prepend system messages
             sys_msgs = [m for m in current_messages if m.get("role") in ("system", "developer")]
@@ -270,7 +270,7 @@ async def _stream_response(
                 continuation_count += 1
                 logger.info(f"Auto-continuing again ({continuation_count}/{MAX_CONTINUATIONS})")
                 output_truncated = False
-                cont_messages[-2] = {"role": "assistant", "content": stream_text_buf[-3000:]}
+                cont_messages[-2] = {"role": "assistant", "content": stream_text_buf[-4000:]}
                 async for event in cw_client.generate_stream(
                     access_token=access_token, messages=cont_messages, model=model,
                     profile_arn=profile_arn, tools=None,
