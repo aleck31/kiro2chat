@@ -157,7 +157,7 @@ async def _stream_response(
             if event.event_type == "assistantResponseEvent":
                 content = event.payload.get("content", "")
                 if content:
-                    content = sanitize_text(content)
+                    content = sanitize_text(content, is_chunk=True)
                     if content:
                         stream_text_buf += content
                         yield _make_chunk(chat_id, created, model, {"content": content})

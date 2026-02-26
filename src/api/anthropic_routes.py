@@ -330,7 +330,7 @@ async def _stream_anthropic(
                 content = event.payload.get("content", "")
                 if not content:
                     continue
-                content = sanitize_text(content)
+                content = sanitize_text(content, is_chunk=True)
                 if not content:
                     continue
 

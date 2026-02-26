@@ -81,8 +81,12 @@ _TOOL_NAME_PATTERN = re.compile(
 )
 
 
-def sanitize_text(text: str) -> str:
-    """Remove Kiro IDE XML markup, tool references, and identity leaks from response text."""
+def sanitize_text(text: str, is_chunk: bool = False) -> str:
+    """Remove Kiro IDE XML markup, tool references, and identity leaks from response text.
+    
+    Args:
+        is_chunk: If True, preserve leading/trailing whitespace (for streaming chunks).
+    """
     if not text:
         return text
     for pattern in _STRIP_PATTERNS:
@@ -97,7 +101,9 @@ def sanitize_text(text: str) -> str:
         text = '\n'.join(lines)
     # Collapse excessive newlines left by removals
     text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
+    if not is_chunk:
+        text = text.strip()
+    return text
 
 def filter_tool_calls(tool_calls: list[dict] | None) -> list[dict] | None:
     """Remove tool_calls that reference Kiro IDE built-in tools."""
