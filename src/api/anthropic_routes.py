@@ -234,6 +234,7 @@ async def anthropic_messages(
     msg_id = _gen_msg_id()
     text_parts: list[str] = []
     content_blocks: list[dict] = []
+    _active_tool: dict | None = None
 
     async for event in _cw.generate_stream(
         access_token=access_token, messages=messages, model=model, profile_arn=profile_arn, tools=tools,
@@ -242,15 +243,37 @@ async def anthropic_messages(
             c = event.payload.get("content", "")
             if c:
                 text_parts.append(c)
-        elif event.event_type == "toolUse":
-            name = event.payload.get("name", "")
+        elif event.event_type in ("toolUse", "toolUseEvent"):
+            payload = event.payload
+            name = payload.get("name", "")
+            tool_use_id = payload.get("toolUseId", "")
+            is_stop = payload.get("stop", False)
+
+            if event.event_type == "toolUseEvent":
+                if is_stop:
+                    if _active_tool and _active_tool["name"] not in KIRO_BUILTIN_TOOLS:
+                        try:
+                            input_obj = json.loads(_active_tool["input_buf"]) if _active_tool["input_buf"] else {}
+                        except json.JSONDecodeError:
+                            input_obj = {"raw": _active_tool["input_buf"]}
+                        content_blocks.append({
+                            "type": "tool_use", "id": _active_tool["id"],
+                            "name": _active_tool["name"], "input": input_obj,
+                        })
+                    _active_tool = None
+                    continue
+                if name and tool_use_id and _active_tool is None:
+                    _active_tool = {"id": tool_use_id, "name": name, "input_buf": ""}
+                if "input" in payload and _active_tool:
+                    _active_tool["input_buf"] += payload["input"]
+                continue
+
             if name in KIRO_BUILTIN_TOOLS:
                 continue
             content_blocks.append({
                 "type": "tool_use",
-                "id": event.payload.get("toolUseId", f"toolu_{uuid.uuid4().hex[:24]}"),
-                "name": name,
-                "input": event.payload.get("input", {}),
+                "id": tool_use_id or f"toolu_{uuid.uuid4().hex[:24]}",
+                "name": name, "input": payload.get("input", {}),
             })
         elif event.event_type == "exception":
             raise HTTPException(status_code=502, detail={"type": "api_error", "message": event.payload.get("message", "")})

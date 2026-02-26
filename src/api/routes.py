@@ -146,6 +146,8 @@ async def _stream_response(
     tool_calls_seen: list[dict] = []
     tool_call_index = 0
     stream_text_buf = ""
+    # Track streaming toolUseEvent aggregation
+    _active_tool: dict | None = None  # {id, name, input_buf}
 
     try:
         async for event in cw_client.generate_stream(
@@ -160,29 +162,54 @@ async def _stream_response(
                         stream_text_buf += content
                         yield _make_chunk(chat_id, created, model, {"content": content})
 
-            elif event.event_type == "toolUse":
+            elif event.event_type in ("toolUse", "toolUseEvent"):
                 payload = event.payload
                 name = payload.get("name", "")
-                if name in KIRO_BUILTIN_TOOLS:
+                tool_use_id = payload.get("toolUseId", "")
+                is_stop = payload.get("stop", False)
+
+                # toolUseEvent comes in streaming chunks: first has name+id, subsequent have input fragments, last has stop=true
+                if event.event_type == "toolUseEvent":
+                    if is_stop:
+                        # Finalize the active tool
+                        if _active_tool and _active_tool["name"] not in KIRO_BUILTIN_TOOLS:
+                            try:
+                                input_obj = json.loads(_active_tool["input_buf"]) if _active_tool["input_buf"] else {}
+                            except json.JSONDecodeError:
+                                input_obj = {"raw": _active_tool["input_buf"]}
+                            arguments = json.dumps(input_obj)
+                            tc_base = {"index": tool_call_index, "id": _active_tool["id"], "type": "function",
+                                       "function": {"name": _active_tool["name"], "arguments": ""}}
+                            yield _make_chunk(chat_id, created, model, {"tool_calls": [tc_base]})
+                            tc_args = {"index": tool_call_index, "function": {"arguments": arguments}}
+                            yield _make_chunk(chat_id, created, model, {"tool_calls": [tc_args]})
+                            tool_calls_seen.append(_active_tool["name"])
+                            tool_call_index += 1
+                        _active_tool = None
+                        continue
+
+                    if name and tool_use_id and _active_tool is None:
+                        # First chunk — start tracking
+                        _active_tool = {"id": tool_use_id, "name": name, "input_buf": ""}
+                    if "input" in payload and _active_tool:
+                        _active_tool["input_buf"] += payload["input"]
                     continue
 
-                tool_use_id = payload.get("toolUseId", f"call_{uuid.uuid4().hex[:24]}")
+                # Legacy toolUse (single event with complete data)
+                if name in KIRO_BUILTIN_TOOLS:
+                    continue
                 tool_input = payload.get("input", {})
                 arguments = json.dumps(tool_input) if not isinstance(tool_input, str) else tool_input
-
-                # Emit tool_calls in incremental chunks (name first, then arguments)
-                tc_base = {"index": tool_call_index, "id": tool_use_id, "type": "function",
+                tc_id = tool_use_id or f"call_{uuid.uuid4().hex[:24]}"
+                tc_base = {"index": tool_call_index, "id": tc_id, "type": "function",
                            "function": {"name": name, "arguments": ""}}
                 yield _make_chunk(chat_id, created, model, {"tool_calls": [tc_base]})
-
-                # Arguments in a separate chunk
                 tc_args = {"index": tool_call_index, "function": {"arguments": arguments}}
                 yield _make_chunk(chat_id, created, model, {"tool_calls": [tc_args]})
-
                 tool_calls_seen.append(name)
                 tool_call_index += 1
 
-            elif event.event_type == "supplementaryWebLinksEvent":
+            elif event.event_type in ("supplementaryWebLinksEvent", "meteringEvent", "contextUsageEvent"):
                 pass
 
             elif event.event_type == "exception":
@@ -220,6 +247,7 @@ async def _non_stream_response(
     text_parts: list[str] = []
     tool_calls: list[dict] = []
     tool_call_index = 0
+    _active_tool: dict | None = None
 
     async for event in cw_client.generate_stream(
         access_token=access_token, messages=messages, model=model,
@@ -229,17 +257,39 @@ async def _non_stream_response(
             content = event.payload.get("content", "")
             if content:
                 text_parts.append(content)
-        elif event.event_type == "toolUse":
+        elif event.event_type in ("toolUse", "toolUseEvent"):
             payload = event.payload
             name = payload.get("name", "")
+            tool_use_id = payload.get("toolUseId", "")
+            is_stop = payload.get("stop", False)
+
+            if event.event_type == "toolUseEvent":
+                if is_stop:
+                    if _active_tool and _active_tool["name"] not in KIRO_BUILTIN_TOOLS:
+                        try:
+                            input_obj = json.loads(_active_tool["input_buf"]) if _active_tool["input_buf"] else {}
+                        except json.JSONDecodeError:
+                            input_obj = {"raw": _active_tool["input_buf"]}
+                        tool_calls.append({
+                            "index": tool_call_index, "id": _active_tool["id"], "type": "function",
+                            "function": {"name": _active_tool["name"], "arguments": json.dumps(input_obj)},
+                        })
+                        tool_call_index += 1
+                    _active_tool = None
+                    continue
+                if name and tool_use_id and _active_tool is None:
+                    _active_tool = {"id": tool_use_id, "name": name, "input_buf": ""}
+                if "input" in payload and _active_tool:
+                    _active_tool["input_buf"] += payload["input"]
+                continue
+
+            # Legacy toolUse
             if name in KIRO_BUILTIN_TOOLS:
                 continue
             tool_input = payload.get("input", {})
             arguments = json.dumps(tool_input) if not isinstance(tool_input, str) else tool_input
             tool_calls.append({
-                "index": tool_call_index,
-                "id": payload.get("toolUseId", f"call_{uuid.uuid4().hex[:24]}"),
-                "type": "function",
+                "index": tool_call_index, "id": tool_use_id or f"call_{uuid.uuid4().hex[:24]}", "type": "function",
                 "function": {"name": name, "arguments": arguments},
             })
             tool_call_index += 1
