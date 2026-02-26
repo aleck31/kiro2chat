@@ -9,7 +9,7 @@
   ![Python](https://img.shields.io/badge/python-≥3.13-blue?logo=python&logoColor=white)
   ![FastAPI](https://img.shields.io/badge/FastAPI-0.129+-green?logo=fastapi&logoColor=white)
   ![License](https://img.shields.io/badge/license-MIT-blue)
-  ![Version](https://img.shields.io/badge/version-0.6.0-purple)
+  ![Version](https://img.shields.io/badge/version-0.7.0-purple)
 </div>
 
 ---
@@ -272,6 +272,18 @@ kiro2chat/src/
 ```
 
 ## 📝 更新日志
+
+### v0.7.0 — 图片支持 & 生产部署 (2026-02-26)
+
+#### 🖼️ 图片支持
+- OpenAI `image_url`（data URI base64）→ CW `images` 格式转换
+- Anthropic `image` blocks（base64 + URL）→ CW `images` 格式转换
+- 已测试：像素颜色识别通过公网端点端到端验证
+
+#### 🔧 生产部署
+- **systemd 服务** — `Restart=always`，3 秒延迟，开机自启
+- 替代 nohup/supervisor.sh，使用正规进程管理
+- `journalctl -u kiro2chat -f` 统一日志查看
 
 ### v0.6.0 — MCP 工具调用 & 流式修复 (2026-02-26)
 

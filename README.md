@@ -9,7 +9,7 @@
   ![Python](https://img.shields.io/badge/python-≥3.13-blue?logo=python&logoColor=white)
   ![FastAPI](https://img.shields.io/badge/FastAPI-0.129+-green?logo=fastapi&logoColor=white)
   ![License](https://img.shields.io/badge/license-MIT-blue)
-  ![Version](https://img.shields.io/badge/version-0.6.0-purple)
+  ![Version](https://img.shields.io/badge/version-0.7.0-purple)
 </div>
 
 ---
@@ -280,6 +280,18 @@ kiro2chat/src/
 | Python | ≥ 3.13 |
 
 ## 📝 Changelog
+
+### v0.7.0 — Image Support & Production Deployment (2026-02-26)
+
+#### 🖼️ Image Support
+- OpenAI `image_url` (data URI base64) → CW `images` format conversion
+- Anthropic `image` blocks (base64 + URL) → CW `images` format conversion
+- Tested: pixel color recognition works end-to-end through public endpoint
+
+#### 🔧 Production Deployment
+- **systemd service** — `Restart=always` with 3s delay, auto-start on boot
+- Replaces nohup/supervisor.sh with proper process management
+- `journalctl -u kiro2chat -f` for unified log viewing
 
 ### v0.6.0 — MCP Tool Calling & Streaming Fixes (2026-02-26)
 
