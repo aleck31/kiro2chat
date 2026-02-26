@@ -137,6 +137,9 @@ def _make_chunk(chat_id: str, created: int, model: str, delta: dict,
     return f"data: {json.dumps(chunk)}\n\n"
 
 
+MAX_CONTINUATIONS = 5  # Auto-continue up to 5 times on truncation
+
+
 async def _stream_response(
     access_token: str, messages: list[dict], model: str, profile_arn: str,
     tools: list[dict] | None, t0: float, include_usage: bool = False,
@@ -149,6 +152,8 @@ async def _stream_response(
     # Track streaming toolUseEvent aggregation
     _active_tool: dict | None = None  # {id, name, input_buf}
     output_truncated = False
+    continuation_count = 0
+    current_messages = messages
 
     try:
         async for event in cw_client.generate_stream(
@@ -225,6 +230,61 @@ async def _stream_response(
             elif event.event_type == "exception":
                 error_msg = event.payload.get("message", str(event.payload))
                 yield _make_chunk(chat_id, created, model, {"content": f"\n\n[Error: {error_msg}]"}, finish_reason="stop")
+
+        # Auto-continue if truncated and no tool calls
+        if output_truncated and not tool_calls_seen and continuation_count < MAX_CONTINUATIONS:
+            continuation_count += 1
+            logger.info(f"Auto-continuing ({continuation_count}/{MAX_CONTINUATIONS}), accumulated {len(stream_text_buf)} chars")
+            output_truncated = False
+            _active_tool = None
+            
+            # Build continuation request with accumulated text as history
+            cont_messages = [
+                {"role": "user", "content": current_messages[0].get("content", "") if current_messages else ""},
+                {"role": "assistant", "content": stream_text_buf[-3000:]},
+                {"role": "user", "content": "Continue exactly from where you stopped. Do not repeat any content."},
+            ]
+            # Prepend system messages
+            sys_msgs = [m for m in current_messages if m.get("role") in ("system", "developer")]
+            cont_messages = sys_msgs + cont_messages
+            
+            async for event in cw_client.generate_stream(
+                access_token=access_token, messages=cont_messages, model=model,
+                profile_arn=profile_arn, tools=None,
+            ):
+                if event.event_type == "assistantResponseEvent":
+                    content = event.payload.get("content", "")
+                    if content:
+                        content = sanitize_text(content, is_chunk=True)
+                        if content:
+                            stream_text_buf += content
+                            yield _make_chunk(chat_id, created, model, {"content": content})
+                elif event.event_type == "contextUsageEvent":
+                    if event.payload.get("contextUsagePercentage", 0) > 0.95:
+                        output_truncated = True
+
+            # If still truncated after this continuation, loop will catch it next time
+            # But we need to recurse — for simplicity, just check once more
+            if output_truncated and continuation_count < MAX_CONTINUATIONS:
+                # One more round
+                continuation_count += 1
+                logger.info(f"Auto-continuing again ({continuation_count}/{MAX_CONTINUATIONS})")
+                output_truncated = False
+                cont_messages[-2] = {"role": "assistant", "content": stream_text_buf[-3000:]}
+                async for event in cw_client.generate_stream(
+                    access_token=access_token, messages=cont_messages, model=model,
+                    profile_arn=profile_arn, tools=None,
+                ):
+                    if event.event_type == "assistantResponseEvent":
+                        content = event.payload.get("content", "")
+                        if content:
+                            content = sanitize_text(content, is_chunk=True)
+                            if content:
+                                stream_text_buf += content
+                                yield _make_chunk(chat_id, created, model, {"content": content})
+                    elif event.event_type == "contextUsageEvent":
+                        if event.payload.get("contextUsagePercentage", 0) > 0.95:
+                            output_truncated = True
 
         finish_reason = "tool_calls" if tool_calls_seen else ("length" if output_truncated else "stop")
         yield _make_chunk(chat_id, created, model, {}, finish_reason=finish_reason)
