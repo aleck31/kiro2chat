@@ -158,6 +158,9 @@ def openai_to_codewhisperer(
         }
 
     # Build the request
+    # Extract images from the current message content blocks
+    images = _extract_images(conv_messages[-1] if conv_messages else {})
+
     cw_req: dict[str, Any] = {
         "conversationState": {
             "chatTriggerType": "MANUAL",
@@ -168,7 +171,7 @@ def openai_to_codewhisperer(
                     "modelId": cw_model,
                     "origin": "AI_EDITOR",
                     "userInputMessageContext": current_user_msg_context,
-                    "images": [],
+                    "images": images,
                 }
             },
             "history": history,
@@ -339,3 +342,48 @@ def _extract_text(content: Any) -> str:
                     parts.append(block.get("text", ""))
         return "\n".join(parts)
     return str(content) if content else ""
+
+
+def _extract_images(msg: dict) -> list[dict]:
+    """Extract images from message content blocks into CW images format.
+
+    Handles:
+    - OpenAI: {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}
+    - Anthropic: {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "..."}}
+    """
+    content = msg.get("content")
+    if not isinstance(content, list):
+        return []
+
+    images = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+
+        # OpenAI format: image_url with data URI
+        if block.get("type") == "image_url":
+            url = block.get("image_url", {}).get("url", "")
+            if url.startswith("data:"):
+                # Parse data:image/png;base64,XXXX
+                try:
+                    header, b64data = url.split(",", 1)
+                    # Extract format from media type
+                    media = header.split(":")[1].split(";")[0]  # image/png
+                    fmt = media.split("/")[1]  # png
+                    if fmt == "jpeg":
+                        fmt = "jpg"
+                    images.append({"format": fmt, "source": {"bytes": b64data}})
+                except (ValueError, IndexError):
+                    pass
+
+        # Anthropic format: image with base64 source
+        elif block.get("type") == "image":
+            source = block.get("source", {})
+            if source.get("type") == "base64":
+                media = source.get("media_type", "image/png")
+                fmt = media.split("/")[1] if "/" in media else "png"
+                if fmt == "jpeg":
+                    fmt = "jpg"
+                images.append({"format": fmt, "source": {"bytes": source.get("data", "")}})
+
+    return images
