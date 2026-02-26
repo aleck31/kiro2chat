@@ -9,7 +9,7 @@
   ![Python](https://img.shields.io/badge/python-≥3.13-blue?logo=python&logoColor=white)
   ![FastAPI](https://img.shields.io/badge/FastAPI-0.129+-green?logo=fastapi&logoColor=white)
   ![License](https://img.shields.io/badge/license-MIT-blue)
-  ![Version](https://img.shields.io/badge/version-0.8.0-purple)
+  ![Version](https://img.shields.io/badge/version-0.9.0-purple)
 </div>
 
 ---

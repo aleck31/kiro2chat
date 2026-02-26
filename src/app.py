@@ -3,10 +3,13 @@
 import asyncio
 import logging
 import sys
+import signal
+import uuid
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse as _JSONResponse
 
 from . import __version__
 from .config import config
@@ -89,6 +92,15 @@ app.add_middleware(
 app.include_router(router)
 app.include_router(agent_router)
 app.include_router(anthropic_router)
+
+
+# Request ID middleware
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    request_id = request.headers.get("x-request-id", str(uuid.uuid4())[:8])
+    response = await call_next(request)
+    response.headers["x-request-id"] = request_id
+    return response
 
 
 # Global exception handlers
