@@ -5,12 +5,11 @@ import os
 import json
 import logging
 import re
+import httpx
 from collections import defaultdict
 from typing import Optional
-
-import httpx
 from aiogram import Bot, Dispatcher, Router, F
-from aiogram.types import Message, BotCommand
+from aiogram.types import Message, BotCommand, FSInputFile
 from aiogram.filters import Command
 from aiogram.enums import ParseMode
 
@@ -34,7 +33,7 @@ session_locks: dict[SessionKey, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 def _session_key(message: Message) -> SessionKey:
     """Get session key: (chat_id, user_id) for group isolation."""
-    return (message.chat.id, message.from_user.id)
+    return (message.chat.id, message.from_user.id if message.from_user else 0)
 
 
 def _get_models() -> list[str]:
@@ -84,6 +83,100 @@ def _brief_tool_input(name: str, inp) -> str:
         k, v = next(iter(inp.items()))
         return f"{k}={str(v)[:40]}"
     return ""
+
+
+def _display_width(s: str) -> int:
+    """Calculate display width accounting for wide (CJK) characters."""
+    import unicodedata
+    return sum(2 if unicodedata.east_asian_width(c) in ('W', 'F') else 1 for c in s)
+
+
+def _pad(s: str, width: int) -> str:
+    """Left-align string to display width, accounting for wide chars."""
+    return s + " " * (width - _display_width(s))
+
+
+def _table_to_pre(text: str) -> str:
+    """Convert Markdown tables to <pre> aligned text since Telegram has no <table> support."""
+    lines = text.split("\n")
+    result = []
+    table_lines: list[list[str]] = []
+
+    def flush_table():
+        if not table_lines:
+            return
+        col_widths = [max(_display_width(row[c]) for row in table_lines) for c in range(len(table_lines[0]))]
+        # Header
+        result.append("  ".join(_pad(cell, w) for cell, w in zip(table_lines[0], col_widths)))
+        result.append("  ".join("-" * w for w in col_widths))
+        # Data rows
+        for row in table_lines[1:]:
+            result.append("  ".join(_pad(cell, w) for cell, w in zip(row, col_widths)))
+        table_lines.clear()
+
+    for line in lines:
+        stripped = line.strip()
+        if re.match(r'^\|(.+\|)+\s*$', stripped):
+            cells = [c.strip() for c in stripped.strip("|").split("|")]
+            if all(re.match(r'^[-:]+$', c) for c in cells):
+                continue
+            if table_lines and len(cells) != len(table_lines[0]):
+                flush_table()
+            table_lines.append(cells)
+        else:
+            if table_lines:
+                flush_table()
+                result.append("")
+            result.append(line)
+
+    flush_table()
+    return "\n".join(result)
+
+
+def _md_to_html(text: str) -> str:
+    """Convert common Markdown to Telegram HTML. Handles bold, italic, inline code, code blocks, tables."""
+    # Convert markdown tables to pre-formatted text first
+    text = _table_to_pre(text)
+    # Process code blocks first to avoid escaping their content incorrectly
+    parts = []
+    last = 0
+    # Fenced code blocks ```lang\n...\n```
+    for m in re.finditer(r'```(?:\w+)?\n?(.*?)```', text, re.DOTALL):
+        before = text[last:m.start()]
+        parts.append(_escape_and_format(before))
+        code = m.group(1).rstrip()
+        parts.append(f"<pre>{_escape_html(code)}</pre>")
+        last = m.end()
+    parts.append(_escape_and_format(text[last:]))
+    return "".join(parts)
+
+
+def _escape_html(s: str) -> str:
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _escape_and_format(s: str) -> str:
+    """Escape HTML and apply inline formatting to a plain-text segment."""
+    # Inline code `...` — escape content, wrap in <code>
+    result = []
+    last = 0
+    for m in re.finditer(r'`([^`]+)`', s):
+        result.append(_apply_inline(_escape_html(s[last:m.start()])))
+        result.append(f"<code>{_escape_html(m.group(1))}</code>")
+        last = m.end()
+    result.append(_apply_inline(_escape_html(s[last:])))
+    return "".join(result)
+
+
+def _apply_inline(s: str) -> str:
+    """Apply bold/italic to already-HTML-escaped text."""
+    # **bold** or __bold__
+    s = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', s)
+    s = re.sub(r'__(.+?)__', r'<b>\1</b>', s)
+    # *italic* or _italic_ (not preceded/followed by word char to avoid false matches)
+    s = re.sub(r'(?<!\w)\*(?!\s)(.+?)(?<!\s)\*(?!\w)', r'<i>\1</i>', s)
+    s = re.sub(r'(?<!\w)_(?!\s)(.+?)(?<!\s)_(?!\w)', r'<i>\1</i>', s)
+    return s
 
 
 def _format_tool_uses(tool_uses: list[dict]) -> str:
@@ -205,6 +298,7 @@ async def handle_message(message: Message):
 
         full_text = ""
         tool_uses: list[dict] = []
+        image_paths: list[str] = []
         chunk_count = 0
 
         try:
@@ -237,7 +331,7 @@ async def handle_message(message: Message):
                                 display = _clean_response(full_text)
                                 if display:
                                     try:
-                                        await reply.edit_text(display[:4096] or "...")
+                                        await reply.edit_text(_md_to_html(display)[:4096] or "...", parse_mode=ParseMode.HTML)
                                     except Exception:
                                         pass
 
@@ -250,9 +344,16 @@ async def handle_message(message: Message):
                             current = _clean_response(full_text)
                             preview = f"{current}\n\n{tool_line}" if current else tool_line
                             try:
-                                await reply.edit_text(preview[:4096])
+                                await reply.edit_text(_md_to_html(preview)[:4096], parse_mode=ParseMode.HTML)
                             except Exception:
                                 pass
+
+                        elif evt_type == "tool_end":
+                            content = event.get("content", {})
+                            if isinstance(content, dict):
+                                for p in content.get("paths", []):
+                                    # Strip file:// prefix
+                                    image_paths.append(p.replace("file://", ""))
 
                         elif evt_type == "error":
                             error_msg = event.get("message", "Unknown error")
@@ -274,9 +375,24 @@ async def handle_message(message: Message):
             _add_to_history(key, "assistant", full_text)
 
             try:
-                await reply.edit_text(display[:4096])
+                await reply.edit_text(
+                    _md_to_html(display)[:4096],
+                    parse_mode=ParseMode.HTML,
+                )
             except Exception:
-                pass
+                # Fallback to plain text if HTML rendering fails
+                try:
+                    await reply.edit_text(display[:4096])
+                except Exception:
+                    pass
+
+            # Send generated images as photos
+            for path in image_paths:
+                if os.path.isfile(path):
+                    try:
+                        await message.answer_photo(FSInputFile(path))
+                    except Exception as e:
+                        logger.warning(f"Failed to send image {path}: {e}")
 
         except Exception as e:
             logger.error(f"Chat error: {e}")

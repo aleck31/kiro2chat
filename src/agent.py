@@ -22,12 +22,13 @@ MCP_CONFIG_PATH = Path.home() / ".config" / "kiro2chat" / "mcp.json"
 BUILTIN_TOOLS = [calculator, file_read, file_write, http_request, shell]
 
 DEFAULT_SYSTEM_PROMPT = """\
-You are kiro2chat, an AI assistant powered by Claude via Kiro/CW.
+You are kiro Cli, an AI assistant powered by Claude.
 
 You have real tools at your disposal — check your tool specifications to see what's available, and use them proactively when they'd help.
 
 ## How you work
 - Be concise and direct. Prioritize actionable information.
+- For any query about **current, real-time, or user-specific state**, you MUST use tools — never answer from training knowledge alone.
 - When a task can be done with your tools, just do it — don't ask permission for routine operations.
 - Show results, not just descriptions of what you did.
 - If a tool call fails, explain what went wrong and try alternatives.
@@ -37,6 +38,7 @@ You have real tools at your disposal — check your tool specifications to see w
 - Only use tools that are actually available in your tool specifications.
 - Do NOT hallucinate tool names or capabilities you don't have.
 - Do NOT output raw XML, function_calls tags, or other markup — use tools through the proper tool calling mechanism.
+- When using the `shell` tool, ALWAYS set `non_interactive: true` — this is a non-interactive environment and there is no terminal to accept prompts.
 """
 
 
@@ -86,7 +88,7 @@ def create_mcp_clients(mcp_config: dict[str, Any] | None = None) -> list[MCPClie
             params = StdioServerParameters(command=command, args=args, env=env)
             client = MCPClient(lambda params=params: stdio_client(params))
             clients.append(client)
-            logger.info(f"✅ MCP server configured: {name} ({command} {' '.join(args)})")
+            logger.debug(f"✅ MCP server configured: {name} ({command} {' '.join(args)})")
         except Exception as e:
             logger.error(f"❌ Failed to configure MCP server '{name}': {e}")
 

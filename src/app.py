@@ -21,8 +21,10 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 # Suppress overly verbose third-party debug logs
+logging.getLogger("openai._base_client").setLevel(logging.INFO)     # drops per-request options dump
 logging.getLogger("strands.models.openai").setLevel(logging.INFO)   # drops "formatted request" dump
 logging.getLogger("strands.tools.registry").setLevel(logging.WARNING)  # drops per-tool "loaded tool config" x30
+logging.getLogger("httpcore").setLevel(logging.INFO)                # drops GeneratorExit false-failure noise
 logger = logging.getLogger(__name__)
 
 
@@ -57,7 +59,7 @@ async def lifespan(app: FastAPI):
     # Cleanup MCP clients
     for client in mcp_clients:
         try:
-            client.__exit__(None, None, None)
+            client.stop(None, None, None)
         except Exception:
             pass
     await tm.close()

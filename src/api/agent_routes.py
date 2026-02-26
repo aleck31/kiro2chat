@@ -78,6 +78,9 @@ async def _stream_agent_sse(message: str) -> AsyncIterator[str]:
 
     try:
         async for event in _agent.stream_async(message):
+            if not isinstance(event, dict):
+                continue
+
             # Text chunk from model
             if "data" in event:
                 chunk = event["data"]
@@ -100,14 +103,20 @@ async def _stream_agent_sse(message: str) -> AsyncIterator[str]:
                         }, ensure_ascii=False)
                         yield f"data: {sse}\n\n"
 
-            # Tool result
-            if "current_tool_use_result" in event:
-                result = event["current_tool_use_result"]
-                sse = json.dumps({
-                    "type": "tool_end",
-                    "result": str(result)[:500],  # Truncate long results
-                }, ensure_ascii=False)
-                yield f"data: {sse}\n\n"
+            # Tool result — extracted from message events with role=user containing toolResult
+            if "message" in event:
+                msg = event["message"]
+                if isinstance(msg, dict) and msg.get("role") == "user":
+                    for block in msg.get("content", []):
+                        if isinstance(block, dict) and "toolResult" in block:
+                            tr = block["toolResult"]
+                            sse = json.dumps({
+                                "type": "tool_end",
+                                "tool_use_id": tr.get("toolUseId", ""),
+                                "status": tr.get("status", ""),
+                                "content": tr.get("structuredContent") or str(tr.get("content", ""))[:500],
+                            }, ensure_ascii=False)
+                            yield f"data: {sse}\n\n"
 
             # Final result
             if "result" in event:

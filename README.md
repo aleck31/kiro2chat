@@ -145,6 +145,13 @@ uv run kiro2chat all       # 全部一起启动
 
 ## Changelog
 
+### v0.7.0
+- TG Bot Markdown 渲染：`_md_to_html()` 转换 `**bold**`、`*italic*`、`` `code` ``、` ```block``` ` 为 Telegram HTML，最终消息用 `parse_mode=HTML`，失败回退纯文本
+- TG Bot 表格转等宽文本：`_table_to_pre()` 将 Markdown 表格转为 `<pre>` 对齐文本（CJK 字符双倍宽度计算）
+- TG Bot 图片发送：`tool_end` 事件解析 `content.paths` 字段，自动发送生成的图片
+- 修复 `agent_routes.py` `tool_end` 提取：改从 `message` 事件的 `toolResult` block 读取，而非 `current_tool_use_result`
+- 抑制 `openai._base_client` 和 `httpcore` DEBUG 日志噪音
+
 ### v0.6.0
 - 修复 `toolUseEvent` 解析：Kiro 流式分块传输工具调用输入，累积 `input_chunks` 至 `stop=True` 后组装完整 tool_call
 - 新增 `_accumulate_tool_use_event()` 处理多块 tool input，替换原错误的 `toolUse` 事件处理

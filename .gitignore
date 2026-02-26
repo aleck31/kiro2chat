@@ -1,12 +1,13 @@
 __pycache__/
 *.pyc
 .venv/
+.env
+.uv/
 *.egg-info/
 .claude
 .kiro
 devguide
 dist/
 build/
-.env
 *.sqlite3
-.uv/
+output/
