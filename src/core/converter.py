@@ -236,7 +236,22 @@ def _convert_tool_message_to_result(msg: dict) -> dict:
 
     # Flatten content to plain text for CW
     if isinstance(content, str):
+        # Client may send a JSON-encoded content blocks array as string
+        # e.g. '[{"type":"text","text":"actual result"}]'
         text = content
+        if content.startswith("[{") or content.startswith("[\\"):
+            try:
+                parsed = json.loads(content)
+                if isinstance(parsed, list):
+                    parts = []
+                    for item in parsed:
+                        if isinstance(item, dict):
+                            parts.append(item.get("text", str(item)))
+                        else:
+                            parts.append(str(item))
+                    text = "\n".join(parts)
+            except (json.JSONDecodeError, TypeError):
+                pass
     elif isinstance(content, list):
         # Extract text from content blocks (Anthropic or OpenAI format)
         parts = []
