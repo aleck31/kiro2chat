@@ -16,15 +16,16 @@
 
 ## ✨ Features
 
-- 🔄 **双协议兼容** — 同时支持 OpenAI `/v1/chat/completions` 和 Anthropic `/v1/messages` 格式
-- 🧠 **Claude Opus 4.6 1M** — 后端固定使用最强模型，1M 上下文窗口
-- 🧹 **System Prompt 清洗** — 三层防御彻底清除 Kiro IDE 注入的系统提示词和工具定义
-- 🛠️ **完整 Tool Calling** — 支持工具定义、tool_choice、tool_result 多轮回传
-- 📡 **流式 + 非流式** — 两种 API 格式均支持 SSE 流式和同步响应
-- 🔑 **自动 Token 管理** — 从 kiro-cli SQLite 读取并自动刷新 IdC Token
-- 🤖 **Strands Agent** — 可选的 Agent 层，支持 MCP 工具
-- 🌐 **Web UI** — Gradio 多页面界面（聊天、监控、配置）
-- 📱 **Telegram Bot** — 通过 Agent 层的 TG 机器人
+- 🔄 **Dual Protocol** — Supports both OpenAI `/v1/chat/completions` and Anthropic `/v1/messages` formats
+- 🧠 **Claude Opus 4.6 1M** — Backend always uses the most powerful model with 1M context window
+- 🧹 **System Prompt Sanitization** — Three-layer defense to strip Kiro IDE injected prompts and tool definitions
+- 🛠️ **Full Tool Calling** — Tool definitions, tool_choice, tool_result round-trip, MCP tool support
+- 📡 **Stream + Non-Stream** — Both API formats support SSE streaming and synchronous responses
+- 🔑 **Auto Token Management** — Reads and auto-refreshes IdC tokens from kiro-cli SQLite
+- 📊 **Token Usage Estimation** — CJK-aware character-based token counting
+- 🤖 **Strands Agent** — Optional agent layer with MCP tool support
+- 🌐 **Web UI** — Gradio multi-page interface (chat, monitoring, config)
+- 📱 **Telegram Bot** — Bot powered by the agent layer
 
 ## 🏗️ Architecture
 
@@ -165,6 +166,8 @@ curl http://localhost:8000/v1/messages \
 | stream_options (include_usage) | ✅ |
 | Any model name accepted | ✅ |
 | Incremental streaming tool_calls | ✅ |
+| MCP tool calling | ✅ |
+| Token usage estimation | ✅ |
 
 ### Anthropic `/v1/messages`
 
@@ -182,14 +185,15 @@ curl http://localhost:8000/v1/messages \
 | SSE events (message_start/delta/stop) | ✅ |
 | input_json_delta streaming | ✅ |
 | count_tokens endpoint | ✅ |
+| Token usage estimation | ✅ |
 
 ## 🧹 System Prompt Sanitization
 
 Kiro's CodeWhisperer backend injects an IDE system prompt containing tool definitions (readFile, fsWrite, webSearch, etc.) that don't exist outside the IDE. kiro2chat implements **three-layer defense**:
 
-1. **Anti-Prompt Injection** — Prepends a high-priority override to every request, declaring the true identity (Claude by Anthropic) and explicitly denying all IDE tools
-2. **Assistant Confirmation** — Injects a fake assistant turn confirming it will ignore IDE tools
-3. **Response Sanitization** — Regex-based post-processing strips any leaked tool names, Kiro identity references, and XML markup from output
+1. **Anti-Prompt Injection** — Prepends a high-priority override declaring the true identity (Claude by Anthropic) and explicitly denying all IDE tools while encouraging user-provided tools
+2. **Assistant Confirmation** — Injects a fake assistant turn confirming it will ignore IDE tools but actively use user-provided tools
+3. **Response Sanitization** — Regex-based post-processing strips leaked tool names, Kiro identity references, and XML markup
 
 **Result**: 28/28 adversarial test scenarios pass with zero leakage.
 
@@ -205,10 +209,6 @@ Kiro's CodeWhisperer backend injects an IDE system prompt containing tool defini
 | `API_KEY` | *(none)* | Optional API authentication key |
 | `TG_BOT_TOKEN` | *(none)* | Telegram Bot token |
 | `LOG_LEVEL` | `info` | Logging level |
-
-### Config File
-
-`~/.config/kiro2chat/config.toml` — editable via Web UI or manually.
 
 ### Model Mapping
 
@@ -226,37 +226,37 @@ All model names are accepted. The backend always uses `claude-opus-4.6-1m`. Comm
 ### Systemd Service
 
 ```bash
-# Install service
 sudo cp kiro2chat@.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now kiro2chat@$(whoami)
-
-# Check status
-sudo systemctl status kiro2chat@$(whoami)
-journalctl -u kiro2chat@$(whoami) -f
 ```
 
-### Docker (coming soon)
+### Environment Variables
+
+```bash
+nohup env API_KEY="your-key" PORT="8800" HOST="0.0.0.0" \
+  uv run kiro2chat api > /tmp/kiro2chat.log 2>&1 &
+```
 
 ## 📁 Project Structure
 
 ```
 kiro2chat/src/
-├── __init__.py              # Version (__version__ = "0.5.0")
-├── app.py                   # FastAPI app, lifespan, CLI, CORS, exception handlers
+├── __init__.py              # Version
+├── app.py                   # FastAPI app, lifespan, CORS, exception handlers
 ├── config.py                # Config (env > TOML > defaults)
 ├── config_manager.py        # TOML config read/write + MCP config
 ├── stats.py                 # Thread-safe request statistics
 ├── webui.py                 # Gradio multi-page Web UI
 ├── agent.py                 # Strands Agent + MCP tools
-├── _tool_names.py           # Built-in tool name registry
 ├── core/
 │   ├── __init__.py          # TokenManager (IdC token refresh)
 │   ├── client.py            # CodeWhisperer API client (httpx async)
-│   ├── converter.py         # OpenAI ↔ CodeWhisperer protocol conversion
+│   ├── converter.py         # OpenAI <-> CodeWhisperer protocol conversion
 │   ├── eventstream.py       # AWS EventStream binary parser
 │   ├── sanitizer.py         # Anti-prompt + response cleansing + identity scrub
-│   └── health.py            # Health check utilities
+│   ├── health.py            # Health check utilities
+│   └── token_counter.py     # CJK-aware token estimator
 ├── api/
 │   ├── routes.py            # /v1/chat/completions, /v1/models (OpenAI)
 │   ├── anthropic_routes.py  # /v1/messages, /v1/messages/count_tokens (Anthropic)
@@ -285,100 +285,47 @@ kiro2chat/src/
 
 **Major: Full MCP tool calling support through client SDKs**
 
-#### 🔧 MCP Tool Calling
-- **`toolUseEvent` streaming support** — CodeWhisperer returns tool calls as incremental `toolUseEvent` chunks (name → input fragments → stop). Now correctly aggregates these into complete `tool_calls`
-- **Tool result round-trip fixed** — Client MCP tools (firecrawl, etc.) can now search/scrape and return results that get correctly forwarded to the backend
-- **History building fix** — Assistant messages with `toolUses` are now correctly placed in CW history during tool result round-trips (was causing 400 errors)
-- **JSON content block parsing** — Client tool results sent as `[{"type":"text","text":"..."}]` strings are now correctly flattened to plain text for CW backend
-- **Tool result truncation** — Long tool results (>50K chars) are truncated to prevent CW request size limits
+#### MCP Tool Calling
+- `toolUseEvent` streaming support — aggregates incremental chunks into complete tool_calls
+- Tool result round-trip fixed — client MCP tools can search/scrape and return results correctly
+- History building fix — assistant messages with toolUses correctly placed in CW history
+- JSON content block parsing — nested content blocks flattened to plain text for CW backend
+- Tool result truncation at 50K chars
 
-#### 🧹 Anti-Prompt Rebalancing
-- Rewrote anti-prompt to **encourage user-provided tool usage** while still blocking Kiro IDE tools
-- Previous version was too aggressive — suppressed legitimate MCP tool calls (firecrawl, web search, etc.)
-- Now explicitly distinguishes: IDE tools (blocked) vs. user API tools (actively used)
+#### Anti-Prompt Rebalancing
+- Rewrote anti-prompt to encourage user-provided tool usage while blocking Kiro IDE tools
+- Explicitly distinguishes: IDE tools (blocked) vs. user API tools (actively used)
 
-#### 📝 Streaming Markdown Fix
+#### Streaming Markdown Fix
 - Fixed `sanitize_text()` stripping whitespace from streaming chunks
-- Was breaking Markdown rendering: `---\n\n## Title` became `---## Title`
-- Streaming chunks now preserve original whitespace; only full responses get trimmed
+- Streaming chunks now preserve original whitespace for proper Markdown rendering
 
-#### 📊 Token Usage Estimation
+#### Token Usage Estimation
 - Added `token_counter.py` with CJK-aware character-based estimation
-- OpenAI: `prompt_tokens`, `completion_tokens`, `total_tokens` in both stream and non-stream
-- Anthropic: `input_tokens`, `output_tokens` in `message_start` and `message_delta` events
-- `count_tokens` endpoint uses same estimator
+- OpenAI: `prompt_tokens`, `completion_tokens`, `total_tokens`
+- Anthropic: `input_tokens`, `output_tokens`
 
 ### v0.5.0 — API Gateway (2026-02-26)
 
-**Major upgrade: Full OpenAI + Anthropic API compatibility**
-
-#### 🔄 Dual Protocol Support
-- **Anthropic Messages API** (`/v1/messages`) — full compatibility with streaming, tools, system prompts, images, thinking blocks
-- **`/v1/messages/count_tokens`** — token count estimation endpoint
-- **`/v1/messages/batches`** — stub endpoint (501)
-
-#### 🧠 Backend Model
-- Fixed backend to **Claude Opus 4.6 1M** (`claude-opus-4.6-1m`)
-- All model names accepted (gpt-4o, claude-sonnet-4, any string)
-- Discovered correct model ID format and required `KiroIDE` User-Agent header
-
-#### 🧹 System Prompt Sanitization (3-layer defense)
-- **Anti-prompt injection**: High-priority override denying Kiro identity and IDE tools
-- **Assistant confirmation**: Fake turn reinforcing Claude identity
-- **Response sanitization**: Regex scrubbing of tool names, Kiro references, XML markup
-- 28/28 adversarial test scenarios pass with zero leakage
-
-#### 🛠️ OpenAI Compatibility Enhancements
-- Parameter passthrough: `temperature`, `top_p`, `stop`, `presence_penalty`, `frequency_penalty`
-- `tool_choice` support (`none`/`auto`/`required`/specific tool)
-- `stream_options` with `include_usage`
-- Tool validation (filter empty name/description)
-- Incremental streaming `tool_calls` (name + arguments in separate chunks)
-- `developer` role support
-- Model capabilities in `/v1/models` (vision + function_calling)
-
-#### 🔌 Anthropic Compatibility
-- System prompt as string or content blocks array
-- `tool_choice` conversion (`auto`/`any`/`tool`/`none`)
-- Image blocks (base64 + URL) → OpenAI `image_url` conversion
-- Thinking blocks passthrough
-- `stop_sequences` support
-- Proper SSE event sequence (`message_start` → `content_block_*` → `message_delta` → `message_stop`)
-- `input_json_delta` for streaming tool input
-
-#### 🏗️ Infrastructure
-- CORS middleware (allow all origins)
-- Global exception handlers (HTTP + unhandled)
-- `/health` endpoint for monitoring
-- systemd service template (`kiro2chat@.service`)
+- Full OpenAI + Anthropic dual protocol support
+- Backend fixed to Claude Opus 4.6 1M
+- Three-layer system prompt sanitization (28/28 tests pass)
+- Parameter passthrough, tool_choice, tool validation
+- CORS, global exception handlers, health check
+- systemd service template
 
 ### v0.4.0 — Agent Integration
-
-- Strands Agent integration (LiteLLM + MCP tools)
-- Agent API endpoints (`/v1/agent/chat` stream + non-stream)
-- TG Bot via Agent layer
-- Built-in tools: calculator, file_read, file_write, http_request, shell
-- MCP config reuse from Kiro CLI (`~/.kiro/settings/mcp.json`)
-
 ### v0.3.0 — Tool Calling
-
-- OpenAI-compatible `tool_calls` support (stream + non-stream)
-- Tool role message passback to CodeWhisperer
-
 ### v0.2.0 — Web UI
-
-- Gradio multi-page Web UI (Navbar)
-- System config page + monitoring dashboard
-- TOML config file management
-- Request statistics module
-
 ### v0.1.0 — Initial Release
 
-- OpenAI-compatible API (`/v1/chat/completions`, `/v1/models`)
-- kiro-cli token auto-refresh
-- Stream + non-stream responses
-- Telegram Bot
-- Basic Gradio Web UI
+## 👥 Contributors
+
+This project is built on the excellent foundation created by **[Aleck](https://github.com/aleck)** (original author), who designed the core architecture including the CodeWhisperer protocol reverse engineering, EventStream binary parser, and kiro-cli token management.
+
+**[Neo](https://github.com/neosun100)** extended the project with full OpenAI + Anthropic API compatibility, system prompt sanitization, MCP tool calling support, and production deployment features.
+
+We welcome contributions from the community! Whether it's bug fixes, new features, documentation improvements, or test cases — all contributions are appreciated. Please see our issues page for areas where help is needed.
 
 ## 📄 License
 
