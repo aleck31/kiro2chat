@@ -62,7 +62,7 @@ def init_agent_routes(agent: Any, mcp_clients: list, mcp_config: dict) -> None:
     _loaded_mcp_tools = _snapshot_loaded_tools(mcp_config, mcp_clients)
 
 
-async def _stream_agent_sse(message: str) -> AsyncIterator[str]:
+async def _stream_agent_sse(prompt) -> AsyncIterator[str]:
     """Stream agent response as SSE events.
 
     Event types:
@@ -77,7 +77,7 @@ async def _stream_agent_sse(message: str) -> AsyncIterator[str]:
     t0 = time.time()
 
     try:
-        async for event in _agent.stream_async(message):
+        async for event in _agent.stream_async(prompt):
             if not isinstance(event, dict):
                 continue
 
@@ -155,9 +155,26 @@ async def agent_chat(request: Request):
     message = body.get("message", "")
     stream = body.get("stream", False)
     model_id = body.get("model")
+    images = body.get("images", [])  # list of {"data": base64, "format": "png"|"jpeg"}
 
-    if not message:
-        raise HTTPException(status_code=400, detail="message is required")
+    if not message and not images:
+        raise HTTPException(status_code=400, detail="message or images required")
+
+    # Build prompt: string or ContentBlock list for multimodal
+    if images:
+        import base64
+        prompt: list[dict] = []
+        if message:
+            prompt.append({"text": message})
+        for img in images:
+            prompt.append({
+                "image": {
+                    "format": img.get("format", "jpeg"),
+                    "source": {"bytes": base64.b64decode(img["data"])},
+                }
+            })
+    else:
+        prompt = message
 
     if model_id:
         from ..agent import create_model
@@ -165,7 +182,7 @@ async def agent_chat(request: Request):
 
     if stream:
         return StreamingResponse(
-            _stream_agent_sse(message),
+            _stream_agent_sse(prompt),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -176,7 +193,7 @@ async def agent_chat(request: Request):
 
     # Non-streaming: use async to avoid blocking the event loop
     try:
-        result = await _agent.invoke_async(message)
+        result = await _agent.invoke_async(prompt)
 
         content = ""
         tool_uses = []

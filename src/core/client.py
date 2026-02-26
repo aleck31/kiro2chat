@@ -6,7 +6,7 @@ from typing import AsyncIterator
 import httpx
 
 from ..config import config
-from .converter import openai_to_codewhisperer
+from .converter import openai_to_kiro
 from .eventstream import EventStreamMessage, parse_streaming_eventstream
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ class KiroClient:
         conversation_id: str | None = None,
     ) -> AsyncIterator[EventStreamMessage]:
         """Send request to Kiro and yield streaming EventStream messages."""
-        kiro_req = openai_to_codewhisperer(
+        kiro_req = openai_to_kiro(
             messages=messages,
             model=model,
             tools=tools,
@@ -51,7 +51,7 @@ class KiroClient:
 
         async with self._http.stream(
             "POST",
-            config.codewhisperer_url,
+            config.kiro_api_endpoint,
             json=kiro_req,
             headers={
                 "Content-Type": "application/json",

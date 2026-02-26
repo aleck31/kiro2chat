@@ -280,8 +280,29 @@ async def cmd_model(message: Message):
     await message.answer(f"✅ Model set to `{chosen}`", parse_mode=ParseMode.MARKDOWN)
 
 
+@router.message(F.photo)
+async def handle_photo(message: Message):
+    """Handle photo messages — download image and send to agent with caption."""
+    await _handle_user_message(message, has_photo=True)
+
+
+@router.message(F.document)
+async def handle_document(message: Message):
+    """Handle document messages — check if it's an image and process."""
+    doc = message.document
+    if doc and doc.mime_type and doc.mime_type.startswith("image/"):
+        await _handle_user_message(message, has_document_image=True)
+    elif message.caption:
+        # Non-image document with caption, treat as text
+        await _handle_user_message(message)
+
+
 @router.message(F.text)
 async def handle_message(message: Message):
+    await _handle_user_message(message)
+
+
+async def _handle_user_message(message: Message, *, has_photo: bool = False, has_document_image: bool = False):
     key = _session_key(message)
 
     # Acquire per-session lock to ensure message ordering
@@ -294,7 +315,26 @@ async def handle_message(message: Message):
     async with lock:
         reply = await message.answer("⏳ Thinking...")
 
-        _add_to_history(key, "user", message.text or "")
+        text = message.caption or message.text or ""
+        _add_to_history(key, "user", text)
+
+        # Build request body
+        body: dict = {"message": text, "stream": True, "model": session_models.get(key)}
+        if has_photo:
+            import base64
+            photo = message.photo[-1]  # highest resolution
+            bio = await message.bot.download(photo)
+            img_b64 = base64.b64encode(bio.read()).decode()
+            body["images"] = [{"data": img_b64, "format": "jpeg"}]
+        elif has_document_image:
+            import base64
+            doc = message.document
+            bio = await message.bot.download(doc)
+            img_b64 = base64.b64encode(bio.read()).decode()
+            # Detect format from mime_type
+            mime = doc.mime_type or "image/jpeg"
+            fmt = mime.split("/")[-1].replace("jpg", "jpeg")
+            body["images"] = [{"data": img_b64, "format": fmt}]
 
         full_text = ""
         tool_uses: list[dict] = []
@@ -307,7 +347,7 @@ async def handle_message(message: Message):
                 async with client.stream(
                     "POST",
                     f"{API_BASE}/v1/agent/chat",
-                    json={"message": message.text, "stream": True, "model": session_models.get(key)},
+                    json=body,
                 ) as resp:
                     resp.raise_for_status()
                     async for line in resp.aiter_lines():

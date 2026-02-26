@@ -1,0 +1,55 @@
+# Changelog
+
+### v0.8.0
+- Agent API 多模态支持：`/v1/agent/chat` 新增 `images` 参数，构造 Strands ContentBlock 列表
+- Converter 图片支持：`_extract_images()` 处理 OpenAI `image_url` 和 Bedrock `image` 格式，转为 Kiro images 格式
+- TG Bot 图片输入：支持 photo 和 document（大图/PNG）两种方式发送图片给 Agent
+- 流式中间状态 HTML 渲染：`tool_start` 和每 N chunk 更新也应用 `_md_to_html` + `parse_mode=HTML`
+
+### v0.7.0
+- TG Bot Markdown 渲染：`_md_to_html()` 转换 `**bold**`、`*italic*`、`` `code` ``、` ```block``` ` 为 Telegram HTML，最终消息用 `parse_mode=HTML`，失败回退纯文本
+- TG Bot 表格转等宽文本：`_table_to_pre()` 将 Markdown 表格转为 `<pre>` 对齐文本（CJK 字符双倍宽度计算）
+- TG Bot 图片发送：`tool_end` 事件解析 `content.paths` 字段，自动发送生成的图片
+- 修复 `agent_routes.py` `tool_end` 提取：改从 `message` 事件的 `toolResult` block 读取，而非 `current_tool_use_result`
+- 抑制 `openai._base_client` 和 `httpcore` DEBUG 日志噪音
+
+### v0.6.0
+- 修复 `toolUseEvent` 解析：Kiro 流式分块传输工具调用输入，累积 `input_chunks` 至 `stop=True` 后组装完整 tool_call
+- 新增 `_accumulate_tool_use_event()` 处理多块 tool input，替换原错误的 `toolUse` 事件处理
+- 修复 shell 工具阻塞：添加 `STRANDS_NON_INTERACTIVE=true` 环境变量，禁用 PTY 和交互确认
+- 修复 AWS CLI pager 阻塞：`.env` 添加 `AWS_PAGER=`，子进程继承空值禁用 `less`
+- TG Bot 工具调用实时状态：`tool_start` 事件显示 `🔧 name: brief_input...`，`_brief_tool_input()` 按工具类型提取关键参数
+- WebUI 聊天改为流式 SSE：`agent_chat_fn` 从阻塞 `httpx.post` 改为 generator + `httpx.stream`，实时渲染工具使用进度
+- 修复 `/v1/agent/reload` 500 错误：移除不适用的 `tool_registry.process_tools()` 调用，reload 仅重启 MCP 连接
+
+### v0.5.0
+- 修复 Agent 自回环死锁：非流式路径改用 `await invoke_async()`，移除多 worker
+- Agent /chat 支持 per-request 切换模型
+- 统一 MCP 配置源为 `~/.kiro/settings/mcp.json`，修复 webui 标注错误
+- 跳过 http/sse 类型 MCP server（不再崩溃）
+- 修复 `mcp.client.stdio` 与 gradio 的循环导入死锁
+- Telegram bot 模型列表改为从 `/v1/models` 动态获取
+
+### v0.4.0
+- Strands Agent 集成（OpenAIModel 自回环 + MCP 工具）
+- Agent API endpoints（/v1/agent/chat 流式 + 非流式）
+- TG Bot 改为通过 Agent 层调用
+- 内置工具：calculator, file_read, file_write, http_request, shell
+- MCP 配置复用 Kiro CLI (~/.kiro/settings/mcp.json)
+
+### v0.3.0
+- OpenAI 兼容 API 完整 tool_calls 支持（流式 + 非流式）
+- tool role 消息回传 Kiro
+
+### v0.2.0
+- Gradio 多页面 Web UI (Navbar)
+- 系统配置页 + 监控面板
+- TOML 配置文件管理
+- 请求统计模块
+
+### v0.1.0
+- OpenAI 兼容 API (/v1/chat/completions, /v1/models)
+- kiro-cli token 自动刷新
+- 流式 + 非流式响应
+- Telegram Bot
+- 基础 Gradio Web UI

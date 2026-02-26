@@ -2,8 +2,13 @@
 
 import asyncio
 import logging
+import os
 import sys
 from contextlib import asynccontextmanager
+
+# Ensure non-interactive tool execution (must be set before any imports that read them)
+os.environ.setdefault("AWS_PAGER", "")
+os.environ.setdefault("STRANDS_NON_INTERACTIVE", "true")
 
 import uvicorn
 from fastapi import FastAPI

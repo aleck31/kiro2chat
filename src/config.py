@@ -36,14 +36,14 @@ def _get(key: str, env_key: str | None = None) -> str | None:
 class Config:
     port: int = int(_get("port", "PORT") or "8000")
     host: str = _get("host", "HOST") or "0.0.0.0"
-    api_key: str | None = _get("api_key", "API_KEY")
+    api_key: str | None = os.getenv("API_KEY")
     log_level: str = _get("log_level", "LOG_LEVEL") or "info"
 
     # kiro-cli SQLite database path
-    kiro_db_path: str = (
+    kiro_db_path: str = str(Path(
         _get("kiro_db_path", "KIRO_DB_PATH")
         or str(Path.home() / ".local/share/kiro-cli/data.sqlite3")
-    )
+    ).expanduser())
 
     # Telegram bot
     tg_bot_token: str | None = _get("tg_bot_token", "TG_BOT_TOKEN")
@@ -53,8 +53,8 @@ class Config:
         _get("idc_refresh_url", "IDC_REFRESH_URL")
         or "https://oidc.us-east-1.amazonaws.com/token"
     )
-    codewhisperer_url: str = (
-        _get("codewhisperer_url", "CODEWHISPERER_URL")
+    kiro_api_endpoint: str = (
+        _get("kiro_api_endpoint", "KIRO_API_ENDPOINT")
         or "https://codewhisperer.us-east-1.amazonaws.com/generateAssistantResponse"
     )
 
@@ -62,7 +62,8 @@ class Config:
     profile_arn: str = os.getenv("PROFILE_ARN", "")
 
     # Model mapping: OpenAI model name -> Kiro model ID
-    model_map: dict[str, str] = field(default_factory=lambda: {
+    # config.toml > hardcoded defaults
+    model_map: dict[str, str] = field(default_factory=lambda: _file_cfg.get("model_map") or {
         # Opus 4.6
         "claude-opus-4-6 (Krio)": "claude-opus-4.6",
         # Sonnet 4.6

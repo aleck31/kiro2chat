@@ -10,14 +10,6 @@ KIRO_MCP_CONFIG = Path.home() / ".kiro" / "settings" / "mcp.json"
 
 # Flat key -> TOML section mapping
 _SECTIONS = {
-    "host": "server",
-    "port": "server",
-    "log_level": "server",
-    "api_key": "auth",
-    "kiro_db_path": "kiro",
-    "tg_bot_token": "telegram",
-    "idc_refresh_url": "aws",
-    "codewhisperer_url": "aws",
     "default_model": "model",
     "model_map": "model",
 }

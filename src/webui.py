@@ -57,46 +57,22 @@ def chat_stream(message: str, history: list[dict], model: str):
 # Config page helpers
 # ---------------------------------------------------------------------------
 
-def _tg_bot_token() -> str:
-    """Get TG bot token from config or env."""
-    import os
-    return os.environ.get("TG_BOT_TOKEN", "")
-
-
 def load_config_values():
     cfg = load_config_file()
     c = config
     return (
-        cfg.get("host", c.host),
-        int(cfg.get("port", c.port)),
-        cfg.get("log_level", c.log_level),
-        cfg.get("api_key", c.api_key or ""),
-        cfg.get("kiro_db_path", c.kiro_db_path),
-        cfg.get("tg_bot_token", _tg_bot_token()),
-        cfg.get("idc_refresh_url", c.idc_refresh_url),
-        cfg.get("codewhisperer_url", c.codewhisperer_url),
         cfg.get("default_model", c.default_model),
         json.dumps(cfg.get("model_map", dict(c.model_map)), indent=2, ensure_ascii=False),
     )
 
 
-def save_config(host, port, log_level, api_key, kiro_db_path,
-                tg_bot_token, idc_refresh_url, codewhisperer_url,
-                default_model, model_map_json):
+def save_config(default_model, model_map_json):
     try:
         model_map = json.loads(model_map_json) if model_map_json.strip() else {}
     except json.JSONDecodeError as e:
         return f"❌ model_map JSON 解析错误: {e}"
 
     data = {
-        "host": host,
-        "port": int(port),
-        "log_level": log_level,
-        "api_key": api_key,
-        "kiro_db_path": kiro_db_path,
-        "tg_bot_token": tg_bot_token,
-        "idc_refresh_url": idc_refresh_url,
-        "codewhisperer_url": codewhisperer_url,
         "default_model": default_model,
         "model_map": model_map,
     }
@@ -366,54 +342,23 @@ def create_ui() -> gr.Blocks:
 
     # ---- Settings Page ----
     with demo.route("⚙️ 系统配置", "/settings"):
-        gr.Markdown("# ⚙️ 系统配置\n编辑后点击保存，重启服务生效。")
+        gr.Markdown("# ⚙️ 系统配置")
 
         defaults = load_config_values()
 
-        with gr.Tab(id='server', label='Server'):
+        with gr.Tab(id='model', label='模型配置'):
 
-            gr.Markdown("### 🌐 服务器")
+            gr.Markdown("### 🧠 模型配置\n修改后保存，重启服务生效。")
 
-            with gr.Row():
-                with gr.Column():
-                    cfg_host = gr.Textbox(label="Host", value=defaults[0])
-                    cfg_port = gr.Number(label="Port", value=defaults[1], precision=0)
-                    cfg_log_level = gr.Dropdown(
-                        choices=["debug", "info", "warning", "error"],
-                        value=defaults[2],
-                        label="日志级别",
-                    )
-
-                with gr.Column():
-                    gr.Markdown("### 🔐 认证")
-                    cfg_api_key = gr.Textbox(label="API Key", value=defaults[3], type="password")
-
-                    gr.Markdown("### 📂 Kiro")
-                    cfg_kiro_db = gr.Textbox(label="kiro_db_path", value=defaults[4])
-
-            with gr.Row():
-                gr.Markdown("### ☁️ AWS 端点")
-                cfg_idc_url = gr.Textbox(label="idc_refresh_url", value=defaults[6])
-                cfg_kiro_url = gr.Textbox(label="codewhisperer_url", value=defaults[7])
-
-            with gr.Row():
-                gr.Markdown("### 🤖 Telegram Bot")
-                cfg_tg_token = gr.Textbox(label="tg_bot_token", value=defaults[5], type="password")
-
-            gr.Markdown("### 🧠 模型配置")
-            cfg_default_model = gr.Textbox(label="默认模型", value=defaults[8])
-            cfg_model_map = gr.Code(label="model_map (JSON)", value=defaults[9], language="json")
+            cfg_default_model = gr.Textbox(label="默认模型", value=defaults[0])
+            cfg_model_map = gr.Code(label="model_map (JSON)", value=defaults[1], language="json")
 
             save_btn = gr.Button("💾 保存配置", variant="primary")
             save_status = gr.Markdown("")
 
             save_btn.click(
                 fn=save_config,
-                inputs=[
-                    cfg_host, cfg_port, cfg_log_level, cfg_api_key, cfg_kiro_db,
-                    cfg_tg_token, cfg_idc_url, cfg_kiro_url,
-                    cfg_default_model, cfg_model_map,
-                ],
+                inputs=[cfg_default_model, cfg_model_map],
                 outputs=[save_status],
             )
 

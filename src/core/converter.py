@@ -10,14 +10,14 @@ from ..config import config
 logger = logging.getLogger(__name__)
 
 
-def openai_to_codewhisperer(
+def openai_to_kiro(
     messages: list[dict],
     model: str,
     tools: list[dict] | None = None,
     profile_arn: str = "",
     conversation_id: str | None = None,
 ) -> dict:
-    """Convert OpenAI ChatCompletion request to Kiro format.
+    """Convert OpenAI ChatCompletion request to Kiro(CodeWhisperer) format.
 
     Handles system, user, assistant, and tool role messages.
     Tool results (role="tool") are converted to Kiro toolResults format.
@@ -151,6 +151,9 @@ def openai_to_codewhisperer(
             "tools": kiro_tools,
         }
 
+    # Extract images from the last message content
+    images = _extract_images(last_msg.get("content")) if last_role != "tool" else []
+
     # Build the request
     kiro_req: dict[str, Any] = {
         "conversationState": {
@@ -162,7 +165,7 @@ def openai_to_codewhisperer(
                     "modelId": kiro_model,
                     "origin": "AI_EDITOR",
                     "userInputMessageContext": current_user_msg_context,
-                    "images": [],
+                    "images": images,
                 }
             },
             "history": history,
@@ -311,3 +314,47 @@ def _extract_text(content: Any) -> str:
                     parts.append(block.get("text", ""))
         return "\n".join(parts)
     return str(content) if content else ""
+
+
+def _extract_images(content: Any) -> list[dict]:
+    """Extract images from OpenAI message content blocks.
+
+    Handles OpenAI format (image_url with base64 data URL) and
+    Bedrock/Strands format (image with source.bytes).
+    Returns Kiro images format: [{"format": "jpeg", "source": {"bytes": "<base64_str>"}}]
+    """
+    import base64 as b64mod
+
+    if not isinstance(content, list):
+        return []
+
+    images = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+
+        # OpenAI format: {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}
+        if block.get("type") == "image_url":
+            url = block.get("image_url", {}).get("url", "")
+            if url.startswith("data:"):
+                header, _, data = url.partition(",")
+                fmt = "jpeg"
+                if "png" in header:
+                    fmt = "png"
+                elif "webp" in header:
+                    fmt = "webp"
+                elif "gif" in header:
+                    fmt = "gif"
+                images.append({"format": fmt, "source": {"bytes": data}})
+
+        # Bedrock/Strands format: {"image": {"format": "png", "source": {"bytes": b"..."}}}
+        elif "image" in block:
+            img = block["image"]
+            src = img.get("source", {})
+            raw = src.get("bytes", b"")
+            # If bytes is raw, encode to base64 string
+            if isinstance(raw, (bytes, bytearray)):
+                raw = b64mod.b64encode(raw).decode()
+            images.append({"format": img.get("format", "jpeg"), "source": {"bytes": raw}})
+
+    return images

@@ -50,11 +50,9 @@ kiro2chat/src/
 │   ├── converter.py      # OpenAI ↔ Kiro 协议转换
 │   └── eventstream.py    # AWS EventStream 二进制协议解析
 ├── api/
-│   ├── __init__.py
 │   ├── routes.py         # /v1/chat/completions, /v1/models
 │   └── agent_routes.py   # /v1/agent/chat, /v1/agent/tools, /v1/agent/reload
 └── bot/
-    ├── __init__.py
     └── telegram.py       # Telegram Bot (aiogram)
 ```
 
@@ -73,7 +71,7 @@ kiro2chat/src/
 | 包管理 | uv + hatchling |
 | Python | ≥ 3.13 |
 
-## 应用模块说明
+## 功能模块说明
 
 ### API 路由 (`api/routes.py`)
 - `GET /v1/models` — 列出可用模型
@@ -92,23 +90,28 @@ kiro2chat/src/
 - MCP 工具从 `~/.kiro/settings/mcp.json` 加载（复用 Kiro CLI 配置）
 - System prompt 引导 Agent 基于 tool spec 自主判断可用工具
 
+### Web UI (`webui.py`)
+- **聊天页**：模型选择（默认 `config.default_model`）+ 工具列表 + ChatInterface
+  - 流式 SSE 渲染，实时显示 `🔧 工具名: 参数...` 进度状态
+- **系统配置页**：可视化编辑模型配置，保存到 `~/.config/kiro2chat/config.toml`
+- **监控面板**：请求统计、延迟、错误率、最近请求日志（5s 自动刷新）
+
 ### Telegram Bot (`bot/telegram.py`)
 - 通过 `/v1/agent/chat` 流式调用 Strands Agent
 - 实时显示工具调用状态（`🔧 tool_name: brief_input...`）
+- Markdown 渲染：`_md_to_html()` 转换为 Telegram HTML（bold、italic、code、code block）
+- 表格渲染：`_table_to_pre()` 将 Markdown 表格转为等宽对齐文本（CJK 双倍宽度）
+- 图片输入：支持 photo 和 document（大图/PNG）两种方式发送图片给 Agent
+- 图片输出：Agent 生成的图片自动通过 `send_photo` 发送到聊天窗口
 - 会话隔离：session key = `(chat_id, user_id)`
 - 每会话 asyncio.Lock 防止消息乱序
 - 命令：`/model`, `/tools`, `/clear`, `/help`
 - 过滤原始 XML/function_calls 标记
 - 最大历史 20 条消息
 
-### Web UI (`webui.py`)
-- **聊天页**：模型选择（默认 `config.default_model`）+ 工具列表 + ChatInterface
-  - 流式 SSE 渲染，实时显示 `🔧 工具名: 参数...` 进度状态
-- **系统配置页**：可视化编辑所有配置项，保存到 `~/.config/kiro2chat/config.toml`
-- **监控面板**：请求统计、延迟、错误率、最近请求日志（5s 自动刷新）
-
-### 配置 (`config.py` + `config_manager.py`)
-- 优先级：环境变量 > `~/.config/kiro2chat/config.toml` > 默认值
+### 配置模块 (`config.py` + `config_manager.py`)
+- `.env`：启动参数 + secrets（启动时读一次）
+- `config.toml`：模型配置（Web UI 可编辑）
 - MCP 配置直接读取 `~/.kiro/settings/mcp.json`
 - 统计收集器 (`stats.py`)：线程安全，deque 最近 100 条记录
 
@@ -119,7 +122,11 @@ kiro2chat/src/
 cd ~/repos/kiro2chat
 uv sync
 
-uv run kiro2chat api      # API server (端口 8000, 单 worker)
+# 复制环境变量配置并按需修改
+cp .env.example .env
+# 编辑 .env，填入 TG_BOT_TOKEN 等配置
+
+uv run kiro2chat api      # API server (端口 8000, 基础服务)
 uv run kiro2chat webui     # Web UI (端口 7860)
 uv run kiro2chat bot       # Telegram Bot
 uv run kiro2chat all       # 全部一起启动
@@ -127,71 +134,37 @@ uv run kiro2chat all       # 全部一起启动
 
 ## 配置
 
-### 环境变量
+### 环境变量 (`.env`)
+
+启动参数和敏感信息，详见 `.env.example`：
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
+| TG_BOT_TOKEN | (无) | Telegram Bot Token |
+| API_KEY | (无) | 可选的 API 认证密钥 |
 | HOST | 0.0.0.0 | 服务绑定地址 |
 | PORT | 8000 | API 服务端口 |
-| KIRO_DB_PATH | ~/.local/share/kiro-cli/data.sqlite3 | kiro-cli 数据库路径 |
-| API_KEY | (无) | 可选的 API 认证密钥 |
-| TG_BOT_TOKEN | (无) | Telegram Bot Token |
 | LOG_LEVEL | info | 日志级别 |
+| KIRO_DB_PATH | ~/.local/share/kiro-cli/data.sqlite3 | kiro-cli 数据库路径 |
+| IDC_REFRESH_URL | (AWS 默认) | AWS IdC Token 刷新端点 |
+| KIRO_API_ENDPOINT | (AWS 默认) | Kiro/CodeWhisperer API 端点 |
 
-### 配置文件
+### 模型配置 (`config.toml`)
 
-- **系统配置**：`~/.config/kiro2chat/config.toml`（可通过 Web UI 编辑）
+通过 Web UI 或直接编辑 `~/.config/kiro2chat/config.toml`：
+
+| 配置项 | 说明 |
+|---|---|
+| default_model | 默认模型 |
+| model_map | 模型名称映射 |
+
+### 其他配置
+
 - **MCP 工具**：`~/.kiro/settings/mcp.json`（复用 Kiro CLI 配置）
 
 ## Changelog
 
-### v0.7.0
-- TG Bot Markdown 渲染：`_md_to_html()` 转换 `**bold**`、`*italic*`、`` `code` ``、` ```block``` ` 为 Telegram HTML，最终消息用 `parse_mode=HTML`，失败回退纯文本
-- TG Bot 表格转等宽文本：`_table_to_pre()` 将 Markdown 表格转为 `<pre>` 对齐文本（CJK 字符双倍宽度计算）
-- TG Bot 图片发送：`tool_end` 事件解析 `content.paths` 字段，自动发送生成的图片
-- 修复 `agent_routes.py` `tool_end` 提取：改从 `message` 事件的 `toolResult` block 读取，而非 `current_tool_use_result`
-- 抑制 `openai._base_client` 和 `httpcore` DEBUG 日志噪音
-
-### v0.6.0
-- 修复 `toolUseEvent` 解析：Kiro 流式分块传输工具调用输入，累积 `input_chunks` 至 `stop=True` 后组装完整 tool_call
-- 新增 `_accumulate_tool_use_event()` 处理多块 tool input，替换原错误的 `toolUse` 事件处理
-- 修复 shell 工具阻塞：添加 `STRANDS_NON_INTERACTIVE=true` 环境变量，禁用 PTY 和交互确认
-- 修复 AWS CLI pager 阻塞：`.env` 添加 `AWS_PAGER=`，子进程继承空值禁用 `less`
-- TG Bot 工具调用实时状态：`tool_start` 事件显示 `🔧 name: brief_input...`，`_brief_tool_input()` 按工具类型提取关键参数
-- WebUI 聊天改为流式 SSE：`agent_chat_fn` 从阻塞 `httpx.post` 改为 generator + `httpx.stream`，实时渲染工具使用进度
-- 修复 `/v1/agent/reload` 500 错误：移除不适用的 `tool_registry.process_tools()` 调用，reload 仅重启 MCP 连接
-
-### v0.5.0
-- 修复 Agent 自回环死锁：非流式路径改用 `await invoke_async()`，移除多 worker
-- Agent /chat 支持 per-request 切换模型
-- 统一 MCP 配置源为 `~/.kiro/settings/mcp.json`，修复 webui 标注错误
-- 跳过 http/sse 类型 MCP server（不再崩溃）
-- 修复 `mcp.client.stdio` 与 gradio 的循环导入死锁
-- Telegram bot 模型列表改为从 `/v1/models` 动态获取
-
-### v0.4.0
-- Strands Agent 集成（OpenAIModel 自回环 + MCP 工具）
-- Agent API endpoints（/v1/agent/chat 流式 + 非流式）
-- TG Bot 改为通过 Agent 层调用
-- 内置工具：calculator, file_read, file_write, http_request, shell
-- MCP 配置复用 Kiro CLI (~/.kiro/settings/mcp.json)
-
-### v0.3.0
-- OpenAI 兼容 API 完整 tool_calls 支持（流式 + 非流式）
-- tool role 消息回传 Kiro
-
-### v0.2.0
-- Gradio 多页面 Web UI (Navbar)
-- 系统配置页 + 监控面板
-- TOML 配置文件管理
-- 请求统计模块
-
-### v0.1.0
-- OpenAI 兼容 API (/v1/chat/completions, /v1/models)
-- kiro-cli token 自动刷新
-- 流式 + 非流式响应
-- Telegram Bot
-- 基础 Gradio Web UI
+See [CHANGELOG.md](CHANGELOG.md)
 
 ## License
 
