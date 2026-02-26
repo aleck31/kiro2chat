@@ -1,71 +1,73 @@
-"""Token estimation for Claude models.
+"""Token counting for Claude models using tiktoken.
 
-Claude uses a BPE tokenizer similar to cl100k_base. Rough heuristics:
-- English: ~4 chars per token
-- Chinese/Japanese/Korean: ~1.5 chars per token
-- Code: ~3.5 chars per token
-- JSON/structured: ~3 chars per token
-
-For more accurate counting, we detect CJK characters and adjust accordingly.
+Claude's tokenizer is very close to OpenAI's cl100k_base encoding.
+We use tiktoken for accurate counting, with a character-based fallback
+if tiktoken is not available.
 """
 
-import re
+import logging
 
-# CJK Unicode ranges
-_CJK_RE = re.compile(
-    r'[\u4e00-\u9fff\u3400-\u4dbf\u2e80-\u2eff\u3000-\u303f'
-    r'\uff00-\uffef\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]'
-)
+logger = logging.getLogger(__name__)
+
+try:
+    import tiktoken
+    _enc = tiktoken.get_encoding("cl100k_base")
+    _USE_TIKTOKEN = True
+except ImportError:
+    _USE_TIKTOKEN = False
+    logger.warning("tiktoken not available, using character-based estimation")
 
 
-def estimate_tokens(text: str) -> int:
-    """Estimate token count for a string."""
+def count_tokens(text: str) -> int:
+    """Count tokens in a string."""
     if not text:
         return 0
-
-    cjk_chars = len(_CJK_RE.findall(text))
-    other_chars = len(text) - cjk_chars
-
-    # CJK: ~1.5 chars/token, Other: ~4 chars/token
-    tokens = cjk_chars / 1.5 + other_chars / 4
-
-    # Minimum 1 token for non-empty text
-    return max(1, int(tokens + 0.5))
+    if _USE_TIKTOKEN:
+        return len(_enc.encode(text))
+    # Fallback: rough heuristic
+    import re
+    cjk = len(re.findall(r'[\u4e00-\u9fff\u3400-\u4dbf\u3000-\u303f\uff00-\uffef\u3040-\u30ff\uac00-\ud7af]', text))
+    return max(1, int(cjk / 1.5 + (len(text) - cjk) / 4 + 0.5))
 
 
-def estimate_messages_tokens(messages: list[dict], system: str | None = None) -> int:
-    """Estimate total input tokens for a message list.
+def count_messages_tokens(messages: list[dict], system: str | None = None) -> int:
+    """Count total input tokens for a message list.
 
-    Accounts for per-message overhead (~4 tokens each) and system prompt.
+    Accounts for per-message overhead (~4 tokens) and system prompt.
     """
     total = 0
 
     if system:
-        total += estimate_tokens(system) + 4  # system overhead
+        total += count_tokens(system) + 4
 
     for msg in messages:
-        total += 4  # per-message overhead (role, formatting)
+        total += 4  # per-message overhead
         content = msg.get("content", "")
         if isinstance(content, str):
-            total += estimate_tokens(content)
+            total += count_tokens(content)
         elif isinstance(content, list):
             for block in content:
                 if isinstance(block, dict):
-                    if block.get("type") == "text":
-                        total += estimate_tokens(block.get("text", ""))
-                    elif block.get("type") in ("image", "image_url"):
-                        total += 85  # image tokens estimate
-                    elif block.get("type") == "tool_use":
-                        total += estimate_tokens(str(block.get("input", {})))
-                    elif block.get("type") == "tool_result":
-                        tc = block.get("content", "")
-                        total += estimate_tokens(str(tc))
+                    btype = block.get("type", "")
+                    if btype == "text":
+                        total += count_tokens(block.get("text", ""))
+                    elif btype in ("image", "image_url"):
+                        total += 85  # image token estimate
+                    elif btype == "tool_use":
+                        total += count_tokens(str(block.get("input", {})))
+                    elif btype == "tool_result":
+                        total += count_tokens(str(block.get("content", "")))
 
         # tool_calls in assistant messages
         for tc in msg.get("tool_calls", []):
             fn = tc.get("function", {})
-            total += estimate_tokens(fn.get("name", ""))
-            total += estimate_tokens(fn.get("arguments", ""))
+            total += count_tokens(fn.get("name", ""))
+            total += count_tokens(fn.get("arguments", ""))
 
     total += 3  # assistant reply priming
     return total
+
+
+# Backward-compatible aliases
+estimate_tokens = count_tokens
+estimate_messages_tokens = count_messages_tokens

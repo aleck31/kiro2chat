@@ -13,6 +13,7 @@ dependencies = [
     "openai>=1.0.0",
     "strands-agents>=1.26.0",
     "strands-agents-tools>=0.2.20",
+    "tiktoken>=0.7.0",
     "tomli-w>=1.0.0",
     "uvicorn>=0.40.0",
 ]
