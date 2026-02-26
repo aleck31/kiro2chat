@@ -153,7 +153,6 @@ async def _stream_response(
     _active_tool: dict | None = None  # {id, name, input_buf}
     output_truncated = False
     continuation_count = 0
-    current_messages = messages
 
     try:
         async for event in cw_client.generate_stream(
@@ -232,21 +231,17 @@ async def _stream_response(
                 yield _make_chunk(chat_id, created, model, {"content": f"\n\n[Error: {error_msg}]"}, finish_reason="stop")
 
         # Auto-continue if truncated and no tool calls
-        if output_truncated and not tool_calls_seen and continuation_count < MAX_CONTINUATIONS:
+        while output_truncated and not tool_calls_seen and continuation_count < MAX_CONTINUATIONS:
             continuation_count += 1
             logger.info(f"Auto-continuing ({continuation_count}/{MAX_CONTINUATIONS}), accumulated {len(stream_text_buf)} chars")
             output_truncated = False
             _active_tool = None
             
-            # Build continuation request with accumulated text as history
-            cont_messages = [
-                {"role": "user", "content": current_messages[0].get("content", "") if current_messages else ""},
-                {"role": "assistant", "content": stream_text_buf[-4000:]},
+            # Build continuation: original messages + full output so far + continue prompt
+            cont_messages = list(messages) + [
+                {"role": "assistant", "content": stream_text_buf},
                 {"role": "user", "content": "Your previous output was cut off mid-stream. Continue EXACTLY from the last character. Do not repeat anything. Do not add commentary. Just continue the code/text output until it is complete."},
             ]
-            # Prepend system messages
-            sys_msgs = [m for m in current_messages if m.get("role") in ("system", "developer")]
-            cont_messages = sys_msgs + cont_messages
             
             async for event in cw_client.generate_stream(
                 access_token=access_token, messages=cont_messages, model=model,
@@ -262,29 +257,6 @@ async def _stream_response(
                 elif event.event_type == "contextUsageEvent":
                     if event.payload.get("contextUsagePercentage", 0) > 0.95:
                         output_truncated = True
-
-            # If still truncated after this continuation, loop will catch it next time
-            # But we need to recurse — for simplicity, just check once more
-            if output_truncated and continuation_count < MAX_CONTINUATIONS:
-                # One more round
-                continuation_count += 1
-                logger.info(f"Auto-continuing again ({continuation_count}/{MAX_CONTINUATIONS})")
-                output_truncated = False
-                cont_messages[-2] = {"role": "assistant", "content": stream_text_buf[-4000:]}
-                async for event in cw_client.generate_stream(
-                    access_token=access_token, messages=cont_messages, model=model,
-                    profile_arn=profile_arn, tools=None,
-                ):
-                    if event.event_type == "assistantResponseEvent":
-                        content = event.payload.get("content", "")
-                        if content:
-                            content = sanitize_text(content, is_chunk=True)
-                            if content:
-                                stream_text_buf += content
-                                yield _make_chunk(chat_id, created, model, {"content": content})
-                    elif event.event_type == "contextUsageEvent":
-                        if event.payload.get("contextUsagePercentage", 0) > 0.95:
-                            output_truncated = True
 
         finish_reason = "tool_calls" if tool_calls_seen else ("length" if output_truncated else "stop")
         yield _make_chunk(chat_id, created, model, {}, finish_reason=finish_reason)
