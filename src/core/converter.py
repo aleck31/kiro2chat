@@ -234,22 +234,29 @@ def _convert_tool_message_to_result(msg: dict) -> dict:
     tool_call_id = msg.get("tool_call_id", "")
     content = msg.get("content", "")
 
-    # Content can be string or structured
+    # Flatten content to plain text for CW
     if isinstance(content, str):
-        content_array = [{"text": content}]
+        text = content
     elif isinstance(content, list):
-        content_array = []
+        # Extract text from content blocks (Anthropic or OpenAI format)
+        parts = []
         for item in content:
             if isinstance(item, dict):
-                content_array.append(item)
+                # Handle {"type":"text","text":"..."} or {"text":"..."}
+                parts.append(item.get("text", str(item)))
             else:
-                content_array.append({"text": str(item)})
+                parts.append(str(item))
+        text = "\n".join(parts)
     else:
-        content_array = [{"text": str(content)}]
+        text = str(content)
+
+    # Truncate very long tool results to avoid CW limits
+    if len(text) > 50000:
+        text = text[:50000] + "\n...(truncated)"
 
     return {
         "toolUseId": tool_call_id,
-        "content": content_array,
+        "content": [{"text": text}],
         "status": "success",
     }
 
