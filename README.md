@@ -2,12 +2,14 @@
   <img src="docs/logo.png" alt="kiro2chat logo" width="128" height="128">
   <h1>kiro2chat</h1>
   <p><strong>Kiro → Standard API Gateway</strong></p>
-  <p>将 Kiro CLI 的 Claude Opus 4.6 后端封装为完全兼容的 OpenAI + Anthropic API Gateway</p>
+  <p>Wrap Kiro CLI's Claude Opus 4.6 backend into a fully compatible OpenAI + Anthropic API Gateway</p>
+
+  **[English](README.md)** | **[中文](README_CN.md)**
 
   ![Python](https://img.shields.io/badge/python-≥3.13-blue?logo=python&logoColor=white)
   ![FastAPI](https://img.shields.io/badge/FastAPI-0.129+-green?logo=fastapi&logoColor=white)
   ![License](https://img.shields.io/badge/license-MIT-blue)
-  ![Version](https://img.shields.io/badge/version-0.5.0-purple)
+  ![Version](https://img.shields.io/badge/version-0.6.0-purple)
 </div>
 
 ---
@@ -278,6 +280,33 @@ kiro2chat/src/
 | Python | ≥ 3.13 |
 
 ## 📝 Changelog
+
+### v0.6.0 — MCP Tool Calling & Streaming Fixes (2026-02-26)
+
+**Major: Full MCP tool calling support through client SDKs**
+
+#### 🔧 MCP Tool Calling
+- **`toolUseEvent` streaming support** — CodeWhisperer returns tool calls as incremental `toolUseEvent` chunks (name → input fragments → stop). Now correctly aggregates these into complete `tool_calls`
+- **Tool result round-trip fixed** — Client MCP tools (firecrawl, etc.) can now search/scrape and return results that get correctly forwarded to the backend
+- **History building fix** — Assistant messages with `toolUses` are now correctly placed in CW history during tool result round-trips (was causing 400 errors)
+- **JSON content block parsing** — Client tool results sent as `[{"type":"text","text":"..."}]` strings are now correctly flattened to plain text for CW backend
+- **Tool result truncation** — Long tool results (>50K chars) are truncated to prevent CW request size limits
+
+#### 🧹 Anti-Prompt Rebalancing
+- Rewrote anti-prompt to **encourage user-provided tool usage** while still blocking Kiro IDE tools
+- Previous version was too aggressive — suppressed legitimate MCP tool calls (firecrawl, web search, etc.)
+- Now explicitly distinguishes: IDE tools (blocked) vs. user API tools (actively used)
+
+#### 📝 Streaming Markdown Fix
+- Fixed `sanitize_text()` stripping whitespace from streaming chunks
+- Was breaking Markdown rendering: `---\n\n## Title` became `---## Title`
+- Streaming chunks now preserve original whitespace; only full responses get trimmed
+
+#### 📊 Token Usage Estimation
+- Added `token_counter.py` with CJK-aware character-based estimation
+- OpenAI: `prompt_tokens`, `completion_tokens`, `total_tokens` in both stream and non-stream
+- Anthropic: `input_tokens`, `output_tokens` in `message_start` and `message_delta` events
+- `count_tokens` endpoint uses same estimator
 
 ### v0.5.0 — API Gateway (2026-02-26)
 
