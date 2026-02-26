@@ -330,11 +330,30 @@ kiro2chat/src/
 
 ## 👥 贡献者
 
-本项目基于 **[Aleck](https://github.com/aleck)**（原作者）的优秀基础构建。Aleck 设计了核心架构，包括 CodeWhisperer 协议逆向工程、EventStream 二进制解析器和 kiro-cli Token 管理。
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/aleck">
+        <img src="https://github.com/aleck.png?size=100" width="100" height="100" style="border-radius:50%" alt="Aleck"/><br/>
+        <sub><b>Aleck</b></sub>
+      </a><br/>
+      <sub>原作者</sub>
+    </td>
+    <td align="center">
+      <a href="https://github.com/neosun100">
+        <img src="https://github.com/neosun100.png?size=100" width="100" height="100" style="border-radius:50%" alt="Neo"/><br/>
+        <sub><b>Neo</b></sub>
+      </a><br/>
+      <sub>API 网关 & 清洗系统</sub>
+    </td>
+  </tr>
+</table>
+
+**[Aleck](https://github.com/aleck)** 设计了核心架构——CodeWhisperer 协议逆向工程、EventStream 二进制解析器和 kiro-cli Token 管理。
 
 **[Neo](https://github.com/neosun100)** 在此基础上扩展了完整的 OpenAI + Anthropic API 兼容性、系统提示词清洗、MCP 工具调用支持和生产部署功能。
 
-我们欢迎社区贡献！无论是 Bug 修复、新功能、文档改进还是测试用例——所有贡献都受到感谢。请查看我们的 Issues 页面了解需要帮助的领域。
+我们欢迎社区贡献！无论是 Bug 修复、新功能、文档改进还是测试用例——所有贡献都受到感谢。
 
 ## 📄 许可证
 

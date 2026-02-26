@@ -321,11 +321,30 @@ kiro2chat/src/
 
 ## 👥 Contributors
 
-This project is built on the excellent foundation created by **[Aleck](https://github.com/aleck)** (original author), who designed the core architecture including the CodeWhisperer protocol reverse engineering, EventStream binary parser, and kiro-cli token management.
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/aleck">
+        <img src="https://github.com/aleck.png?size=100" width="100" height="100" style="border-radius:50%" alt="Aleck"/><br/>
+        <sub><b>Aleck</b></sub>
+      </a><br/>
+      <sub>Original Author</sub>
+    </td>
+    <td align="center">
+      <a href="https://github.com/neosun100">
+        <img src="https://github.com/neosun100.png?size=100" width="100" height="100" style="border-radius:50%" alt="Neo"/><br/>
+        <sub><b>Neo</b></sub>
+      </a><br/>
+      <sub>API Gateway & Sanitization</sub>
+    </td>
+  </tr>
+</table>
 
-**[Neo](https://github.com/neosun100)** extended the project with full OpenAI + Anthropic API compatibility, system prompt sanitization, MCP tool calling support, and production deployment features.
+**[Aleck](https://github.com/aleck)** designed the core architecture — CodeWhisperer protocol reverse engineering, EventStream binary parser, and kiro-cli token management.
 
-We welcome contributions from the community! Whether it's bug fixes, new features, documentation improvements, or test cases — all contributions are appreciated. Please see our issues page for areas where help is needed.
+**[Neo](https://github.com/neosun100)** extended the project with full OpenAI + Anthropic API compatibility, system prompt sanitization, MCP tool calling support, and production deployment.
+
+We welcome contributions from the community! Whether it's bug fixes, new features, documentation improvements, or test cases — all contributions are appreciated.
 
 ## 📄 License
 
