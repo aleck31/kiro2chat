@@ -199,7 +199,7 @@ def _add_to_history(key: SessionKey, role: str, content: str):
 @router.message(Command("start"))
 async def cmd_start(message: Message):
     await message.answer(
-        "👋 Hi! I'm kiro2chat — send me a message and I'll reply with Claude.\n\n"
+        "👋 Hi! I'm Kiro bot — send me a message and I'll reply with a helpful answer.\n\n"
         "Commands:\n"
         "/model — switch model\n"
         "/tools — view loaded tools\n"
@@ -211,8 +211,8 @@ async def cmd_start(message: Message):
 @router.message(Command("help"))
 async def cmd_help(message: Message):
     await message.answer(
-        "🤖 **kiro2chat Telegram Bot**\n\n"
-        "Just send a text message to chat with Claude.\n\n"
+        "🤖 **Kiro Telegram Bot**\n\n"
+        "Just send a text message to chat with Kiro.\n\n"
         "/model `<name>` — set model\n"
         "/model — list available models\n"
         "/tools — view loaded tools\n"
@@ -233,9 +233,8 @@ async def cmd_tools(message: Message):
     for name in BUILTIN_TOOL_NAMES:
         lines.append(f"  • `{name}`")
 
-    from ..config_manager import load_mcp_config
-    mcp_cfg = load_mcp_config()
-    servers = mcp_cfg.get("mcpServers", {})
+    from ..agent import get_enabled_servers
+    servers = get_enabled_servers()
     if servers:
         lines.append(f"\n**MCP 服务 ({len(servers)}):**")
         for name, cfg in servers.items():
@@ -326,17 +325,17 @@ async def _handle_user_message(message: Message, *, has_photo: bool = False, has
         body: dict = {"message": text, "stream": True, "model": session_models.get(key)}
         if has_photo:
             import base64
+            assert message.photo  # guaranteed by caller
             photo = message.photo[-1]  # highest resolution
-            bio = await message.bot.download(photo)
-            img_b64 = base64.b64encode(bio.read()).decode()
+            bio = await message.bot.download(photo)  # type: ignore[union-attr]
+            img_b64 = base64.b64encode(bio.read()).decode()  # type: ignore[union-attr]
             body["images"] = [{"data": img_b64, "format": "jpeg"}]
         elif has_document_image:
             import base64
             doc = message.document
-            bio = await message.bot.download(doc)
-            img_b64 = base64.b64encode(bio.read()).decode()
-            # Detect format from mime_type
-            mime = doc.mime_type or "image/jpeg"
+            bio = await message.bot.download(doc)  # type: ignore[union-attr, arg-type]
+            img_b64 = base64.b64encode(bio.read()).decode()  # type: ignore[union-attr]
+            mime = doc.mime_type or "image/jpeg"  # type: ignore[union-attr]
             fmt = mime.split("/")[-1].replace("jpg", "jpeg")
             body["images"] = [{"data": img_b64, "format": fmt}]
 

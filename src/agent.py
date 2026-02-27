@@ -1,7 +1,6 @@
 """Strands Agents integration for kiro2chat.
 
-Provides an AI agent backed by kiro2chat's OpenAI-compatible API,
-with MCP tool support loaded from ~/.config/kiro2chat/mcp.json.
+Provides an AI agent backed by kiro2chat's OpenAI-compatible API, with MCP tool support. 
 """
 
 import json
@@ -41,49 +40,83 @@ You have real tools at your disposal — check your tool specifications to see w
 """
 
 
-def load_mcp_config() -> dict[str, Any]:
-    """Load MCP server configuration from ~/.config/kiro2chat/mcp.json."""
-    if not MCP_CONFIG_PATH.exists():
-        return {"mcpServers": {}}
-    try:
-        return json.loads(MCP_CONFIG_PATH.read_text())
-    except Exception as e:
-        logger.error(f"Failed to load MCP config: {e}")
-        return {"mcpServers": {}}
+def get_enabled_server_names() -> list[str]:
+    """Get list of enabled MCP server names from config.toml [mcp] section."""
+    from .config_manager import load_config_file
+    cfg = load_config_file()
+    return cfg.get("enabled_mcp_servers", [])
 
 
-def save_mcp_config(config: dict[str, Any]) -> None:
-    """Save MCP server configuration to ~/.config/kiro2chat/mcp.json."""
-    MCP_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    MCP_CONFIG_PATH.write_text(json.dumps(config, indent=2, ensure_ascii=False))
+def set_enabled_mcp_servers(names: list[str]) -> None:
+    """Save enabled MCP server names to config.toml [mcp] section."""
+    from .config_manager import load_config_file, save_config_file
+    cfg = load_config_file()
+    cfg["enabled_mcp_servers"] = names
+    save_config_file(cfg)
 
 
-def create_mcp_clients(mcp_config: dict[str, Any] | None = None) -> list[MCPClient]:
-    """Create MCPClient instances from config."""
+def get_enabled_servers() -> dict[str, Any]:
+    """Return server configs for enabled MCP servers.
+
+    Reads available servers from Kiro CLI + kiro2chat's own mcp.json,
+    filters by enabled list in config.toml. Opt-in model.
+    """
+    from .config_manager import load_mcp_config as load_kiro_mcp
+
+    # Merge all available servers: Kiro CLI + kiro2chat own
+    all_servers: dict[str, Any] = {}
+    kiro_cfg = load_kiro_mcp()
+    all_servers.update(kiro_cfg.get("mcpServers", {}))
+    if MCP_CONFIG_PATH.exists():
+        try:
+            own_cfg = json.loads(MCP_CONFIG_PATH.read_text())
+            all_servers.update(own_cfg.get("mcpServers", {}))
+        except Exception as e:
+            logger.error(f"Failed to load {MCP_CONFIG_PATH}: {e}")
+
+    enabled = get_enabled_server_names()
+    if not enabled:
+        return {}
+
+    return {name: cfg for name, cfg in all_servers.items() if name in enabled}
+
+
+def create_mcp_clients(servers: dict[str, Any] | None = None) -> list[MCPClient]:
+    """Create MCPClient instances from enabled servers (stdio, http, sse)."""
     from mcp.client.stdio import StdioServerParameters, stdio_client  # lazy to avoid circular import with gradio
 
-    if mcp_config is None:
-        mcp_config = load_mcp_config()
+    if servers is None:
+        servers = get_enabled_servers()
 
     clients: list[MCPClient] = []
-    servers = mcp_config.get("mcpServers", {})
 
     for name, server_cfg in servers.items():
-        # Only stdio-based servers are supported; skip http/sse types
         server_type = server_cfg.get("type", "stdio")
-        if server_type in ("http", "sse"):
-            logger.info(f"⏭️ Skipping MCP server '{name}' (type={server_type}, not supported)")
-            continue
-
-        command = server_cfg.get("command", "")
-        if not command:
-            logger.warning(f"⏭️ Skipping MCP server '{name}' (no command specified)")
-            continue
-
-        args = server_cfg.get("args", [])
-        env = server_cfg.get("env") or None
 
         try:
+            if server_type in ("http", "sse"):
+                url = server_cfg.get("url", "")
+                if not url:
+                    logger.warning(f"⏭️ Skipping MCP server '{name}' (type={server_type}, no url)")
+                    continue
+                if server_type == "http":
+                    from mcp.client.streamable_http import streamablehttp_client
+                    client = MCPClient(lambda url=url: streamablehttp_client(url=url))
+                else:
+                    from mcp.client.sse import sse_client
+                    client = MCPClient(lambda url=url: sse_client(url=url))
+                clients.append(client)
+                logger.debug(f"✅ MCP server configured: {name} ({server_type} → {url})")
+                continue
+
+            # stdio type
+            command = server_cfg.get("command", "")
+            if not command:
+                logger.warning(f"⏭️ Skipping MCP server '{name}' (no command specified)")
+                continue
+
+            args = server_cfg.get("args", [])
+            env = server_cfg.get("env") or None
             params = StdioServerParameters(command=command, args=args, env=env)
             client = MCPClient(lambda params=params: stdio_client(params))
             clients.append(client)
@@ -112,7 +145,7 @@ def create_agent(
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
     api_base: str = "http://localhost:8000/v1",
     model_id: str = _config.default_model,
-    mcp_config: dict[str, Any] | None = None,
+    servers: dict[str, Any] | None = None,
     load_tools: bool = True,
 ) -> tuple[Agent, list[MCPClient]]:
     """Create a Strands Agent with OpenAI-compatible model and MCP tools.
@@ -126,7 +159,7 @@ def create_agent(
     tools: list[Any] = list(BUILTIN_TOOLS)  # Start with built-in tools
 
     if load_tools:
-        mcp_clients = create_mcp_clients(mcp_config)
+        mcp_clients = create_mcp_clients(servers)
         # Start MCP clients and collect tools
         for client in mcp_clients:
             try:

@@ -39,14 +39,13 @@ def _get_tools_display() -> str:
             lines.append(f"\n**MCP 工具 ({len(mcp_servers)} servers / {total} tools):**")
             for s in mcp_servers:
                 name = s["server"]
-                cmd = s.get("command", "?")
-                args = " ".join(s.get("args", [])[:2])
                 tc = s.get("tool_count", 0)
+                stype = s.get("type", "stdio")
                 status = s.get("status", "")
                 if status == "ok":
-                    lines.append(f"- `{name}` — {cmd} {args} ({tc} tools)")
+                    lines.append(f"- `{name}` — {stype} ({tc} tools)")
                 else:
-                    lines.append(f"- `{name}` — {cmd} {args} ⚠️ {status}")
+                    lines.append(f"- `{name}` — {stype} ⚠️ {status}")
         else:
             lines.append("\n**MCP 工具:** (无)")
     except Exception as e:

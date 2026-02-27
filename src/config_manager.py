@@ -10,6 +10,7 @@ KIRO_MCP_CONFIG = Path.home() / ".kiro" / "settings" / "mcp.json"
 _SECTIONS = {
     "default_model": "model",
     "model_map": "model",
+    "enabled_mcp_servers": "mcp",
 }
 
 
@@ -58,6 +59,9 @@ def save_config_file(flat: dict) -> None:
                 for dk, dv in v.items():
                     lines.append(f'"{dk}" = "{dv}"')
                 continue
+            elif isinstance(v, list):
+                items = ", ".join(f'"{i}"' for i in v)
+                lines.append(f"{k} = [{items}]")
             elif isinstance(v, int):
                 lines.append(f"{k} = {v}")
             elif isinstance(v, bool):

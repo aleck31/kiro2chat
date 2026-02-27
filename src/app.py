@@ -51,6 +51,8 @@ logging.basicConfig(level=logging.DEBUG, handlers=[_console, _file])
 logging.getLogger("openai._base_client").setLevel(logging.INFO)     # drops per-request options dump
 logging.getLogger("strands.models.openai").setLevel(logging.INFO)   # drops "formatted request" dump
 logging.getLogger("strands.tools.registry").setLevel(logging.WARNING)  # drops per-tool "loaded tool config" x30
+logging.getLogger("mcp.client.streamable_http").setLevel(logging.WARNING)  # suppress SSE reconnect spam
+logging.getLogger("httpx").setLevel(logging.WARNING)                # suppress MCP HTTP request logs
 logging.getLogger("httpcore").setLevel(logging.INFO)                # drops GeneratorExit false-failure noise
 logger = logging.getLogger(__name__)
 
@@ -75,11 +77,10 @@ async def lifespan(app: FastAPI):
     # Initialize Strands Agent
     mcp_clients = []
     try:
-        from .agent import create_agent
-        from .config_manager import load_mcp_config
-        mcp_config = load_mcp_config()
-        agent, mcp_clients = create_agent(mcp_config=mcp_config)
-        init_agent_routes(agent, mcp_clients, mcp_config)
+        from .agent import create_agent, get_enabled_servers
+        servers = get_enabled_servers()
+        agent, mcp_clients = create_agent(servers=servers)
+        init_agent_routes(agent, mcp_clients, servers)
         logger.info("✅ Strands Agent initialized")
     except Exception as e:
         logger.warning(f"⚠️ Agent init skipped: {e}")

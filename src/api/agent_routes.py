@@ -19,24 +19,19 @@ _mcp_config: dict = {}
 _loaded_mcp_tools: list[dict] = []  # Actual loaded tools per server
 
 
-def _snapshot_loaded_tools(mcp_config: dict, mcp_clients: list) -> list[dict]:
+def _snapshot_loaded_tools(servers: dict, mcp_clients: list) -> list[dict]:
     """Build a snapshot of actually loaded MCP tools from running clients."""
-    servers = mcp_config.get("mcpServers", {})
-    # Only include stdio servers (matching the filter in create_mcp_clients)
-    stdio_names = [
-        name for name, cfg in servers.items()
-        if cfg.get("type", "stdio") not in ("http", "sse") and cfg.get("command", "")
-    ]
+    names = list(servers.keys())
     result = []
     for i, client in enumerate(mcp_clients):
-        name = stdio_names[i] if i < len(stdio_names) else f"server-{i}"
+        name = names[i] if i < len(names) else f"server-{i}"
         cfg = servers.get(name, {})
+        server_type = cfg.get("type", "stdio")
         try:
             tools = client.list_tools_sync()
             result.append({
                 "server": name,
-                "command": cfg.get("command", ""),
-                "args": cfg.get("args", []),
+                "type": server_type,
                 "tools": [t.tool_name for t in tools],
                 "tool_count": len(tools),
                 "status": "ok",
@@ -44,8 +39,7 @@ def _snapshot_loaded_tools(mcp_config: dict, mcp_clients: list) -> list[dict]:
         except Exception as e:
             result.append({
                 "server": name,
-                "command": cfg.get("command", ""),
-                "args": cfg.get("args", []),
+                "type": server_type,
                 "tools": [],
                 "tool_count": 0,
                 "status": f"error: {e}",
@@ -248,29 +242,41 @@ async def list_tools():
 
 @router.post("/reload")
 async def reload_tools():
-    """Reload MCP tools from config."""
-    from ..agent import create_mcp_clients, cleanup_mcp_clients
-    from ..config_manager import load_mcp_config
+    """Reload MCP tools from config, preserving agent conversation history."""
+    from ..agent import cleanup_mcp_clients, get_enabled_servers, create_mcp_clients
+    from .._tool_names import BUILTIN_TOOL_NAMES
 
     global _mcp_clients, _mcp_config, _loaded_mcp_tools
 
     cleanup_mcp_clients(_mcp_clients)
 
-    _mcp_config = load_mcp_config()
+    _mcp_config = get_enabled_servers()
     _mcp_clients = create_mcp_clients(_mcp_config)
 
-    total_tools = 0
+    # Collect new MCP tools
+    new_mcp_tools = []
     for client in _mcp_clients:
         try:
             client.start()
-            total_tools += len(client.list_tools_sync())
+            new_mcp_tools.extend(client.list_tools_sync())
         except Exception as e:
             logger.error(f"Failed to start MCP client on reload: {e}")
+
+    # Rebuild agent tool registry: keep builtins, replace MCP tools
+    builtin_names = set(BUILTIN_TOOL_NAMES)
+    registry = _agent.tool_registry.registry
+    # Remove old MCP tools
+    for name in list(registry.keys()):
+        if name not in builtin_names:
+            del registry[name]
+    # Register new MCP tools
+    for tool in new_mcp_tools:
+        _agent.tool_registry.register_tool(tool)
 
     _loaded_mcp_tools = _snapshot_loaded_tools(_mcp_config, _mcp_clients)
 
     return {
         "status": "ok",
-        "servers": list(_mcp_config.get("mcpServers", {}).keys()),
-        "tool_count": total_tools,
+        "servers": list(_mcp_config.keys()),
+        "tool_count": len(new_mcp_tools),
     }

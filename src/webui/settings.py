@@ -5,7 +5,8 @@ import json
 import gradio as gr
 
 from ..config import config
-from ..config_manager import load_config_file, save_config_file, load_mcp_config, save_mcp_config
+from ..config_manager import load_config_file, save_config_file, load_mcp_config
+from ..agent import get_enabled_server_names, set_enabled_mcp_servers
 
 
 def _load_config_values():
@@ -21,17 +22,22 @@ def _save_config(default_model, model_map_json):
     try:
         model_map = json.loads(model_map_json) if model_map_json.strip() else {}
     except json.JSONDecodeError as e:
-        return f"❌ model_map JSON 格式错误（第 {e.lineno} 行第 {e.colno} 列）：{e.msg}"
+        raise gr.Error(f"model_map JSON 格式错误（第 {e.lineno} 行第 {e.colno} 列）：{e.msg}")
 
-    data = {
-        "default_model": default_model,
-        "model_map": model_map,
-    }
+    # Merge with existing config to preserve other sections (e.g. [mcp])
+    data = load_config_file()
+    data["default_model"] = default_model
+    data["model_map"] = model_map
     try:
         save_config_file(data)
-        return "✅ 配置已保存！重启服务后生效。"
+        gr.Info("配置已保存！重启服务后生效。")
+        return (
+            default_model,
+            json.dumps(model_map, indent=2, ensure_ascii=False),
+            gr.Button(value="✅ 已保存", interactive=False),
+        )
     except Exception as e:
-        return f"❌ 保存失败: {e}"
+        raise gr.Error(f"保存失败: {e}")
 
 
 def build_settings_page():
@@ -40,40 +46,85 @@ def build_settings_page():
 
     defaults = _load_config_values()
 
+    with gr.Tab(id='mcp', label='MCP Config') as mcp_tab:
+        gr.Markdown("### 🎛️ Agent MCP Servers\nKiro MCP Server 全局配置 (`~/.kiro/settings/mcp.json`)")
+
+        def _get_all_server_names():
+            # Kiro CLI + kiro2chat own mcp.json
+            names = list(load_mcp_config().get("mcpServers", {}).keys())
+            from ..agent import MCP_CONFIG_PATH
+            if MCP_CONFIG_PATH.exists():
+                try:
+                    own = json.loads(MCP_CONFIG_PATH.read_text())
+                    names.extend(own.get("mcpServers", {}).keys())
+                except Exception:
+                    pass
+            return list(dict.fromkeys(names))  # dedupe, preserve order
+
+        def _mcp_label():
+            all_names = _get_all_server_names()
+            enabled = get_enabled_server_names()
+            return f"启用的 MCP Servers ({len(enabled)}/{len(all_names)})"
+
+        mcp_toggle = gr.CheckboxGroup(
+            choices=_get_all_server_names(),
+            value=get_enabled_server_names(),
+            label=_mcp_label(),
+        )
+
+        # Refresh choices/value when tab is selected
+        def _refresh_toggle():
+            return gr.CheckboxGroup(
+                choices=_get_all_server_names(), value=get_enabled_server_names(), label=_mcp_label(),
+            )
+        mcp_tab.select(fn=_refresh_toggle, outputs=[mcp_toggle])
+
+        toggle_btn = gr.Button("💾 保存并 Reload", variant="primary", interactive=False)
+
+        mcp_toggle.change(
+            fn=lambda: gr.Button(value="💾 保存并 Reload", interactive=True),
+            outputs=[toggle_btn],
+        )
+
+        gr.Markdown("Kiro2chat MCP 配置 (`~/.config/kiro2chat/mcp.json`)")
+        gr.Code(label="JSON", value='TBD', language="json")
+
+        def save_and_reload(selected):
+            import httpx
+            set_enabled_mcp_servers(selected)
+            all_names = _get_all_server_names()
+            try:
+                resp = httpx.post("http://localhost:8000/v1/agent/reload", timeout=30)
+                data = resp.json()
+                n = data.get("tool_count", 0)
+                gr.Info(f"已启用 {len(selected)}/{len(all_names)} 个 MCP server，共 {n} tools")
+            except Exception as e:
+                gr.Warning(f"已保存，但 reload 失败: {e}")
+            label = f"启用的 MCP Servers ({len(selected)}/{len(all_names)})"
+            return (
+                gr.CheckboxGroup(choices=all_names, value=selected, label=label),
+                gr.Button(value="✅ 已保存", interactive=False),
+            )
+
+        toggle_btn.click(fn=save_and_reload, inputs=[mcp_toggle], outputs=[mcp_toggle, toggle_btn])
+
     with gr.Tab(id='model', label='模型配置'):
         gr.Markdown("### 🧠 模型配置\n修改后保存，重启服务生效。")
 
         cfg_default_model = gr.Textbox(label="默认模型", value=defaults[0])
-        cfg_model_map = gr.Code(label="model_map (JSON)", value=defaults[1], language="json")
+        gr.Markdown("Model MAP")
+        cfg_model_map = gr.Code(label="JSON", value=defaults[1], language="json")
 
         save_btn = gr.Button("💾 保存配置", variant="primary")
-        save_status = gr.Markdown("")
+
+        def _enable_save():
+            return gr.Button(value="💾 保存配置", interactive=True)
+
+        cfg_default_model.input(fn=_enable_save, outputs=[save_btn])
+        cfg_model_map.input(fn=_enable_save, outputs=[save_btn])
 
         save_btn.click(
             fn=_save_config,
             inputs=[cfg_default_model, cfg_model_map],
-            outputs=[save_status],
+            outputs=[cfg_default_model, cfg_model_map, save_btn],
         )
-
-    with gr.Tab(id='mcp', label='MCP Config'):
-        gr.Markdown("### 🔧 MCP Servers 配置\n编辑 `~/.kiro/settings/mcp.json`")
-
-        def load_mcp_json():
-            cfg = load_mcp_config()
-            return json.dumps(cfg, indent=2, ensure_ascii=False)
-
-        mcp_json = gr.Code(label="mcp.json", value=load_mcp_json(), language="json")
-
-        def save_mcp_json(mcp_text):
-            try:
-                data = json.loads(mcp_text)
-                save_mcp_config(data)
-                return "✅ MCP 配置已保存！使用 Reload 按钮加载。"
-            except json.JSONDecodeError as e:
-                return f"❌ JSON 解析错误: {e}"
-            except Exception as e:
-                return f"❌ 保存失败: {e}"
-
-        mcp_save_btn = gr.Button("💾 保存 MCP 配置", variant="secondary")
-        mcp_status = gr.Markdown("")
-        mcp_save_btn.click(fn=save_mcp_json, inputs=[mcp_json], outputs=[mcp_status])
