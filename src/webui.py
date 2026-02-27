@@ -70,7 +70,7 @@ def save_config(default_model, model_map_json):
     try:
         model_map = json.loads(model_map_json) if model_map_json.strip() else {}
     except json.JSONDecodeError as e:
-        return f"❌ model_map JSON 解析错误: {e}"
+        return f"❌ model_map JSON 格式错误（第 {e.lineno} 行第 {e.colno} 列）：{e.msg}"
 
     data = {
         "default_model": default_model,
@@ -201,7 +201,7 @@ def create_ui() -> gr.Blocks:
         # Hidden state to bridge model dropdown (rendered below) into ChatInterface
         model_state = gr.State(value=default_model)
 
-        def agent_chat_fn(message: str, history: list[dict], model: str):
+        def agent_chat_fn(message: str, history: list[dict], model: str, request: gr.Request):
             def _brief(name: str, inp) -> str:
                 if isinstance(inp, str):
                     try:
@@ -229,11 +229,13 @@ def create_ui() -> gr.Blocks:
             try:
                 full_text = ""
                 tool_status = ""
+                session_id = request.session_hash or "unknown" if request else "unknown"
 
                 with httpx.stream(
                     "POST",
                     f"{API_BASE}/v1/agent/chat",
                     json={"message": message, "model": model, "stream": True},
+                    headers={"x-user-tag": f"web:{session_id[:8]}"},
                     timeout=120,
                 ) as resp:
                     resp.raise_for_status()

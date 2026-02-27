@@ -303,6 +303,10 @@ async def handle_message(message: Message):
 
 
 async def _handle_user_message(message: Message, *, has_photo: bool = False, has_document_image: bool = False):
+    from ..log_context import user_tag
+    uid = message.from_user.id if message.from_user else 0
+    user_tag.set(f"tg:{uid}")
+
     key = _session_key(message)
 
     # Acquire per-session lock to ensure message ordering
@@ -348,6 +352,7 @@ async def _handle_user_message(message: Message, *, has_photo: bool = False, has
                     "POST",
                     f"{API_BASE}/v1/agent/chat",
                     json=body,
+                    headers={"x-user-tag": f"tg:{uid}"},
                 ) as resp:
                     resp.raise_for_status()
                     async for line in resp.aiter_lines():

@@ -148,6 +148,14 @@ async def agent_chat(request: Request):
     Supports both streaming (SSE) and non-streaming responses.
     Set stream=true in the request body for SSE streaming.
     """
+    from ..log_context import user_tag
+    # Set user tag for logging context
+    client_tag = request.headers.get("x-user-tag")
+    if not client_tag:
+        client_ip = request.client.host if request.client else "unknown"
+        client_tag = f"api:{client_ip}"
+    user_tag.set(client_tag)
+
     if _agent is None:
         raise HTTPException(status_code=503, detail="Agent not initialized")
 

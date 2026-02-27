@@ -21,10 +21,30 @@ from .api.routes import router, init_services
 from .api.agent_routes import router as agent_router, init_agent_routes
 
 # Configure logging
-logging.basicConfig(
-    level=getattr(logging, config.log_level.upper(), logging.INFO),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+from pathlib import Path
+from logging.handlers import RotatingFileHandler
+from .log_context import UserTagFilter
+
+_log_fmt = "%(asctime)s [%(levelname)s] %(name)s%(user_tag)s: %(message)s"
+_user_filter = UserTagFilter()
+
+# Console handler — follows LOG_LEVEL
+_console = logging.StreamHandler()
+_console.setLevel(getattr(logging, config.log_level.upper(), logging.INFO))
+_console.setFormatter(logging.Formatter(_log_fmt))
+_console.addFilter(_user_filter)
+
+# File handler — always DEBUG, 20MB × 10 files
+_log_dir = Path(__file__).resolve().parent.parent / "logs"
+_log_dir.mkdir(parents=True, exist_ok=True)
+_file = RotatingFileHandler(
+    _log_dir / "kiro2chat.log", maxBytes=20 * 1024 * 1024, backupCount=10, encoding="utf-8",
 )
+_file.setLevel(logging.DEBUG)
+_file.setFormatter(logging.Formatter(_log_fmt))
+_file.addFilter(_user_filter)
+
+logging.basicConfig(level=logging.DEBUG, handlers=[_console, _file])
 # Suppress overly verbose third-party debug logs
 logging.getLogger("openai._base_client").setLevel(logging.INFO)     # drops per-request options dump
 logging.getLogger("strands.models.openai").setLevel(logging.INFO)   # drops "formatted request" dump

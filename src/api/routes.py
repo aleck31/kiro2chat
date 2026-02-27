@@ -71,6 +71,13 @@ async def chat_completions(
 ):
     _check_auth(authorization, x_api_key)
 
+    from ..log_context import user_tag
+    client_tag = request.headers.get("x-user-tag")
+    if not client_tag:
+        client_ip = request.client.host if request.client else "unknown"
+        client_tag = f"api:{client_ip}"
+    user_tag.set(client_tag)
+
     body = await request.json()
     logger.info(f"📥 chat_completions request: model={body.get('model')}, messages={len(body.get('messages', []))}, tools={len(body.get('tools', []) or [])}, stream={body.get('stream')}")
     messages = body.get("messages", [])
