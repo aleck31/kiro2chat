@@ -25,14 +25,21 @@ Wrap Kiro CLI's Claude backend into an OpenAI + Anthropic compatible API Gateway
 # Prerequisites: kiro-cli installed and logged in
 cd ~/repos/kiro2chat
 uv sync
+cp .env.example .env   # edit with your config
 
-# Copy and edit environment config
-cp .env.example .env
+./kiro2chat.sh start   # start all services in background
+./kiro2chat.sh stop    # stop
+```
 
-uv run kiro2chat api       # API server (port 8000)
-uv run kiro2chat webui     # Web UI (port 7860)
-uv run kiro2chat bot       # Telegram Bot
-uv run kiro2chat all       # All together
+> Run `./kiro2chat.sh attach` to view live output (detach with `Ctrl+B D`).
+
+Or run directly:
+
+```bash
+uv run kiro2chat all       # all services
+uv run kiro2chat api       # API server only (port 8000)
+uv run kiro2chat webui     # Web UI only (port 7860)
+uv run kiro2chat bot       # Telegram Bot only
 ```
 
 ### Usage with OpenAI SDK

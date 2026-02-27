@@ -27,14 +27,22 @@
 # 前置条件：kiro-cli 已安装并登录
 cd ~/repos/kiro2chat
 uv sync
+cp .env.example .env   # 编辑配置
 
-# 复制并编辑环境配置
-cp .env.example .env
+./kiro2chat.sh start   # 后台启动所有服务
+./kiro2chat.sh status  # 查看状态
+./kiro2chat.sh stop    # 停止
+```
 
+> 运行 `./kiro2chat.sh attach` 查看实时输出（`Ctrl+B D` 退出）。
+
+或直接运行：
+
+```bash
+uv run kiro2chat all       # 全部一起启动
 uv run kiro2chat api       # API 服务（端口 8000）
 uv run kiro2chat webui     # Web UI（端口 7860）
 uv run kiro2chat bot       # Telegram Bot
-uv run kiro2chat all       # 全部一起启动
 ```
 
 ### 使用 OpenAI SDK
