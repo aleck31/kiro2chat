@@ -240,7 +240,7 @@ async def _stream_response(
             # Build continuation: original messages + full output so far + continue prompt
             cont_messages = list(messages) + [
                 {"role": "assistant", "content": stream_text_buf},
-                {"role": "user", "content": "Your previous output was cut off mid-stream. Continue EXACTLY from the last character. Do not repeat anything. Do not add commentary. Just continue the code/text output until it is complete."},
+                {"role": "user", "content": "Your previous response was truncated by the system at the output limit. The content is INCOMPLETE. You MUST continue outputting from EXACTLY where you left off — pick up from the very last character. Do NOT summarize, do NOT add commentary, do NOT say 'let me know if you need more'. Just output the remaining content until it is genuinely finished."},
             ]
             
             async for event in cw_client.generate_stream(
