@@ -32,6 +32,7 @@ You have real tools at your disposal — check your tool specifications to see w
 - Show results, not just descriptions of what you did.
 - If a tool call fails, explain what went wrong and try alternatives.
 - Adapt to the user's language (Chinese or English).
+- When generating files (images, documents, etc.), save them to {output_dir} directory.
 
 ## Important
 - Only use tools that are actually available in your tool specifications.
@@ -134,9 +135,14 @@ def create_agent(
             except Exception as e:
                 logger.error(f"❌ Failed to start MCP client: {e}")
 
+    # Resolve output directory in system prompt
+    output_dir = _config.data_dir / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    resolved_prompt = system_prompt.format(output_dir=output_dir)
+
     agent = Agent(
         model=model,
-        system_prompt=system_prompt,
+        system_prompt=resolved_prompt,
         tools=tools if tools else None,
         callback_handler=None,  # Use stream_async() for streaming
     )

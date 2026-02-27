@@ -9,83 +9,57 @@
 ## Quick Deploy
 
 ```bash
-git clone https://github.com/neosun100/kiro2chat.git
+git clone https://github.com/aleck31/kiro2chat.git
 cd kiro2chat
 uv sync
+cp .env.example .env   # edit with your config
 ```
 
 ## systemd Service (Recommended)
 
-### 1. Create environment file
+The project includes a template service file `kiro2chat@.service` that uses the system username as the instance parameter.
+
+### 1. Configure environment
 
 ```bash
-sudo tee /etc/kiro2chat.env > /dev/null << 'EOF'
-API_KEY=your-api-key-here
-EOF
-sudo chmod 600 /etc/kiro2chat.env
+cd ~/repos/kiro2chat
+cp .env.example .env
+# Edit .env: set API_KEY, TG_BOT_TOKEN, etc.
+chmod 600 .env
 ```
 
-### 2. Create service file
+### 2. Install and start
 
 ```bash
-sudo tee /etc/systemd/system/kiro2chat.service > /dev/null << EOF
-[Unit]
-Description=kiro2chat API Gateway
-After=network.target
-
-[Service]
-Type=simple
-User=$(whoami)
-WorkingDirectory=$(pwd)
-Environment=HOME=$HOME
-Environment=PATH=$(dirname $(which uv)):$PATH
-Environment=PORT=8800
-Environment=HOST=0.0.0.0
-Environment=LOG_LEVEL=info
-EnvironmentFile=/etc/kiro2chat.env
-ExecStart=$(which uv) run python -c "from src.app import app; import uvicorn; uvicorn.run(app, host='0.0.0.0', port=8800, log_level='info')"
-Restart=always
-RestartSec=3
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-EOF
-```
-
-### 3. Enable and start
-
-```bash
+sudo cp kiro2chat@.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now kiro2chat
+sudo systemctl enable --now kiro2chat@$(whoami)
 ```
 
-### 4. Verify
+### 3. Verify
 
 ```bash
-sudo systemctl status kiro2chat
-curl http://localhost:8800/
+sudo systemctl status kiro2chat@$(whoami)
+curl http://localhost:8000/health
 ```
 
 ## Management Commands
 
 ```bash
 # Status
-sudo systemctl status kiro2chat
+sudo systemctl status kiro2chat@$(whoami)
 
 # Restart
-sudo systemctl restart kiro2chat
+sudo systemctl restart kiro2chat@$(whoami)
 
 # Logs (live)
-sudo journalctl -u kiro2chat -f
-
-# Logs (last 100 lines)
-sudo journalctl -u kiro2chat -n 100
+journalctl --user -u kiro2chat@$(whoami) -f
 
 # Stop
-sudo systemctl stop kiro2chat
+sudo systemctl stop kiro2chat@$(whoami)
 ```
+
+Application logs are also written to `~/.local/share/kiro2chat/logs/kiro2chat.log` (rotating, 20MB × 10 files).
 
 ## Nginx Reverse Proxy
 
@@ -100,7 +74,7 @@ server {
     ssl_certificate_key /path/to/key.pem;
 
     location / {
-        proxy_pass http://127.0.0.1:8800;
+        proxy_pass http://127.0.0.1:8000;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -124,10 +98,8 @@ server {
 
 ### Prometheus Metrics
 
-The `/metrics` endpoint exposes Prometheus-compatible metrics:
-
 ```bash
-curl http://localhost:8800/metrics
+curl http://localhost:8000/metrics
 ```
 
 Available metrics:
@@ -143,12 +115,22 @@ Available metrics:
 ### Health Check
 
 ```bash
-curl http://localhost:8800/health
+curl http://localhost:8000/health
 ```
+
+## Data Directories
+
+| Path | Purpose |
+|------|---------|
+| `~/.config/kiro2chat/config.toml` | Model config (Web UI editable) |
+| `~/.local/share/kiro2chat/logs/` | Application logs |
+| `~/.local/share/kiro2chat/output/` | Agent-generated files |
+| `~/.local/share/kiro-cli/data.sqlite3` | kiro-cli auth tokens |
+
+Override data directory with `KIRO2CHAT_DATA_DIR` environment variable.
 
 ## Security
 
-- API key is stored in `/etc/kiro2chat.env` with 600 permissions
-- Never commit API keys to git
-- The `.gitignore` excludes `.env`, `*.sqlite3`, `config.toml`
-- All responses are sanitized to remove Kiro/CodeWhisperer references
+- Secrets (API_KEY, TG_BOT_TOKEN) stored in `.env` with 600 permissions
+- Never commit `.env` to git (already in `.gitignore`)
+- All responses are sanitized to remove Kiro/CodeWhisperer identity leaks

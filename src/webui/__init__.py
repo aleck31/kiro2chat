@@ -1,9 +1,8 @@
 """Gradio Web UI for kiro2chat — assembles pages into multi-page app."""
 
-from pathlib import Path
-
 import gradio as gr
 
+from ..config import config as _config
 from .chat import build_chat_page
 from .monitor import build_monitor_page
 from .settings import build_settings_page
@@ -27,7 +26,7 @@ LAUNCH_KWARGS = {
     "server_name": "0.0.0.0",
     "server_port": 7860,
     "footer_links": [],
-    "allowed_paths": ["/tmp", str(Path(__file__).resolve().parent.parent.parent / "output")],
+    "allowed_paths": ["/tmp", str(_config.data_dir / "output")],
 }
 
 

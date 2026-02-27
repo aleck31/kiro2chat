@@ -24,7 +24,6 @@ from .api.anthropic_routes import router as anthropic_router, init_anthropic_rou
 from .api.agent_routes import router as agent_router, init_agent_routes
 
 # Configure logging
-from pathlib import Path
 from logging.handlers import RotatingFileHandler
 from .log_context import UserTagFilter
 
@@ -38,7 +37,7 @@ _console.setFormatter(logging.Formatter(_log_fmt))
 _console.addFilter(_user_filter)
 
 # File handler — always DEBUG, 20MB × 10 files
-_log_dir = Path(__file__).resolve().parent.parent / "logs"
+_log_dir = config.data_dir / "logs"
 _log_dir.mkdir(parents=True, exist_ok=True)
 _file = RotatingFileHandler(
     _log_dir / "kiro2chat.log", maxBytes=20 * 1024 * 1024, backupCount=10, encoding="utf-8",

@@ -6,8 +6,8 @@ After=network.target
 Type=simple
 User=%i
 WorkingDirectory=/home/%i/repos/kiro2chat
+EnvironmentFile=/home/%i/repos/kiro2chat/.env
 Environment=PATH=/home/%i/.local/bin:/usr/bin
-Environment=KIRO_DB_PATH=/home/%i/.local/share/kiro-cli/data.sqlite3
 ExecStart=/home/%i/.local/bin/uv run kiro2chat api
 Restart=always
 RestartSec=5
@@ -17,7 +17,7 @@ StandardError=journal
 # Hardening
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/home/%i/.config/kiro2chat /home/%i/.local/share/kiro-cli
+ReadWritePaths=/home/%i/.config/kiro2chat /home/%i/.local/share/kiro2chat /home/%i/.local/share/kiro-cli /tmp
 
 [Install]
 WantedBy=multi-user.target

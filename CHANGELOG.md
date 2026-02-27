@@ -1,5 +1,33 @@
 # Changelog
 
+### v0.9.0
+- **Anthropic Messages API** — `/v1/messages` 完整兼容（流式 + 非流式），支持 tool_use/tool_result、image blocks、thinking blocks、auto-continuation
+- `/v1/messages/count_tokens` token 估算端点
+- **三层提示词防御** — `sanitizer.py` anti-prompt 注入 + assistant 确认 + 响应清洗（identity/tool scrub）
+- `converter.py` 集成 `build_system_prompt()`，始终注入 anti-prompt（不再依赖用户是否提供 system prompt）
+- `routes.py` 流式和非流式输出集成 `sanitize_text()` 响应清洗
+- **Token 计数** — `token_counter.py` tiktoken cl100k_base 优先，CJK 感知 fallback
+- **Prometheus 监控** — `metrics.py` + `/metrics` 端点（请求计数、延迟直方图、token 统计、工具调用、错误、重试）
+- **健康检查** — `health.py` + `/health` 端点
+- **Client 重试** — 5xx + timeout 自动重试，指数退避 1s→3s→10s，最多 3 次
+- Client 超时 120s → 7200s（2 小时，适配长输出）
+- Client 添加 `KiroIDE` User-Agent header
+- CORS middleware
+- GitHub Actions CI（pytest + ruff）
+- systemd 服务模板 `kiro2chat@.service`
+- 28 个测试（sanitizer 15 + token_counter 7 + converter 6）
+- Agent system prompt 更新：身份改为 kiro2chat，去掉过度强制的工具使用指令
+- README 改为英文，新增 README_CN.md、CONTRIBUTING.md、docs/DEPLOYMENT.md
+- 感谢 @neosun100 (PR #1) 贡献核心功能代码
+
+### v0.8.1
+- WebUI 拆分为包 `src/webui/`（chat, monitor, settings）
+- Chat 页：多模态输入（图片上传）、Agent 图片输出显示
+- Chat 页：Chatbot 高度 60vh、可折叠工具列表、隐藏 share 按钮和 footer
+- 日志系统：双 handler（console + rotating file 20MB×10）、ContextVar 用户标签
+- 配置拆分：`.env`（secrets + 启动参数）vs `config.toml`（模型配置，Web UI 可编辑）
+- 提取 CHANGELOG.md，创建 .env.example
+
 ### v0.8.0
 - Agent API 多模态支持：`/v1/agent/chat` 新增 `images` 参数，构造 Strands ContentBlock 列表
 - Converter 图片支持：`_extract_images()` 处理 OpenAI `image_url` 和 Bedrock `image` 格式，转为 Kiro images 格式

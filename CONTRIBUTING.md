@@ -1,41 +1,49 @@
 # Contributing to kiro2chat
 
-Thank you for your interest in contributing! Here's how to get started.
-
 ## Development Setup
 
 ```bash
-git clone https://github.com/neosun100/kiro2chat.git
+git clone https://github.com/aleck31/kiro2chat.git
 cd kiro2chat
 uv sync
+cp .env.example .env  # edit with your config
 ```
 
-## Running Tests
+## Running
 
 ```bash
-uv run pytest tests/ -v
+uv run kiro2chat api       # API server
+uv run kiro2chat webui     # Web UI
+uv run kiro2chat bot       # Telegram Bot
+uv run kiro2chat all       # All together
 ```
 
-## Code Style
-
-We use [ruff](https://docs.astral.sh/ruff/) for linting:
+## Testing & Linting
 
 ```bash
-uv run ruff check src/
+uv run pytest tests/ -v    # 28 tests
+uv run ruff check src/     # linter
 ```
+
+Both are enforced by CI on push/PR.
+
+## Code Conventions
+
+- Standard `logging` (not loguru)
+- Type hints everywhere
+- Secrets in `.env`, app config in `config.toml`
+- Chinese UI text are fine
 
 ## Pull Requests
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/my-feature`)
-3. Make your changes
-4. Run tests (`uv run pytest tests/ -v`)
-5. Commit with a descriptive message
-6. Push and open a Pull Request
+1. Create a feature branch (`git checkout -b feature/my-feature`)
+2. Run tests and ruff before committing
+3. Write a concise commit message
+4. Open a PR against `master`
 
 ## Reporting Issues
 
-Please include:
+Please include: 
 - Python version
 - kiro-cli version
 - Error logs (redact any API keys or tokens)

@@ -48,6 +48,12 @@ class Config:
     # Telegram bot
     tg_bot_token: str | None = _get("tg_bot_token", "TG_BOT_TOKEN")
 
+    # Data directory (logs, output, etc.)
+    data_dir: Path = Path(
+        _get("data_dir", "KIRO2CHAT_DATA_DIR")
+        or str(Path.home() / ".local/share/kiro2chat")
+    ).expanduser()
+
     # AWS endpoints
     idc_refresh_url: str = (
         _get("idc_refresh_url", "IDC_REFRESH_URL")
