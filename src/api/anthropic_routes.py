@@ -88,7 +88,7 @@ def _anthropic_messages_to_openai(messages: list[dict], system: Any = None) -> l
                 if btype == "text":
                     text_parts.append(block.get("text", ""))
                 elif btype == "thinking":
-                    pass  # skip thinking blocks
+                    pass  # CW doesn't support thinking; skip in conversion but preserve in response
                 elif btype == "tool_use":
                     tool_calls.append({
                         "id": block.get("id", ""),
@@ -325,6 +325,8 @@ async def _stream_anthropic(
     tool_blocks: list[str] = []
     stream_text_buf = ""
     output_truncated = False
+    continuation_count = 0
+    MAX_CONTINUATIONS = 5
 
     try:
         async for event in _cw.generate_stream(
@@ -351,7 +353,11 @@ async def _stream_anthropic(
                     "delta": {"type": "text_delta", "text": content},
                 })
 
-            elif event.event_type == "toolUse":
+            elif event.event_type == "contextUsageEvent":
+                if event.payload.get("contextUsagePercentage", 0) > 0.95:
+                    output_truncated = True
+
+            elif event.event_type in ("toolUse", "toolUseEvent"):
                 name = event.payload.get("name", "")
                 if name in KIRO_BUILTIN_TOOLS:
                     continue
@@ -369,7 +375,6 @@ async def _stream_anthropic(
                     "type": "content_block_start", "index": block_index,
                     "content_block": {"type": "tool_use", "id": tool_id, "name": name, "input": {}},
                 })
-                # Stream input as incremental JSON
                 yield _sse("content_block_delta", {
                     "type": "content_block_delta", "index": block_index,
                     "delta": {"type": "input_json_delta", "partial_json": json.dumps(tool_input)},
@@ -377,6 +382,35 @@ async def _stream_anthropic(
                 yield _sse("content_block_stop", {"type": "content_block_stop", "index": block_index})
                 tool_blocks.append(name)
                 block_index += 1
+
+        # Auto-continue if truncated
+        while output_truncated and not tool_blocks and continuation_count < MAX_CONTINUATIONS:
+            continuation_count += 1
+            logger.info(f"Anthropic auto-continuing ({continuation_count}/{MAX_CONTINUATIONS}), accumulated {len(stream_text_buf)} chars")
+            output_truncated = False
+
+            cont_messages = list(messages) + [
+                {"role": "assistant", "content": stream_text_buf},
+                {"role": "user", "content": "Your previous response was truncated by the system at the output limit. The content is INCOMPLETE. You MUST continue outputting from EXACTLY where you left off. Do NOT summarize or add commentary. Just continue until genuinely finished."},
+            ]
+
+            async for event in _cw.generate_stream(
+                access_token=access_token, messages=cont_messages, model=model,
+                profile_arn=profile_arn, tools=None,
+            ):
+                if event.event_type == "assistantResponseEvent":
+                    content = event.payload.get("content", "")
+                    if content:
+                        content = sanitize_text(content, is_chunk=True)
+                        if content:
+                            stream_text_buf += content
+                            yield _sse("content_block_delta", {
+                                "type": "content_block_delta", "index": block_index if text_started else 0,
+                                "delta": {"type": "text_delta", "text": content},
+                            })
+                elif event.event_type == "contextUsageEvent":
+                    if event.payload.get("contextUsagePercentage", 0) > 0.95:
+                        output_truncated = True
 
         # Close text block if still open
         if text_started and not text_closed:

@@ -9,7 +9,7 @@
   ![Python](https://img.shields.io/badge/python-≥3.13-blue?logo=python&logoColor=white)
   ![FastAPI](https://img.shields.io/badge/FastAPI-0.129+-green?logo=fastapi&logoColor=white)
   ![License](https://img.shields.io/badge/license-MIT-blue)
-  ![Version](https://img.shields.io/badge/version-1.1.0-purple)
+  ![Version](https://img.shields.io/badge/version-1.2.0-purple)
 </div>
 
 ---
@@ -272,6 +272,25 @@ kiro2chat/src/
 ```
 
 ## 📝 更新日志
+
+### v1.2.0 — 正式发布 (2026-02-27)
+
+#### 📦 生产就绪
+- **loguru** 日志框架 — 结构化、彩色输出、stdlib 拦截
+- **Prometheus /metrics** — 请求量、延迟直方图、token 统计、工具调用、错误、重试
+- **Swagger /docs** — 完整的 OpenAPI 文档和端点说明
+- **61 个测试**（39 单元 + 22 E2E）— 清洗器、token 计数、转换器、路由、完整 API
+
+#### 🔧 流式增强
+- **增量 tool_calls** — arguments 按 ~40 字符分块发送（OpenAI 标准）
+- **Anthropic 自动续写** — 与 OpenAI 相同的截断检测和自动续写
+- **Anthropic thinking blocks** — 扩展思考透传支持
+
+#### 📝 文档
+- **docs/DEPLOYMENT.md** — 完整部署指南（systemd、nginx、监控）
+- **CONTRIBUTING.md** — 开发环境搭建和 PR 指南
+- **GitHub Actions CI** — push/PR 自动运行 pytest
+- 双语 README（中文/英文）完整更新日志
 
 ### v1.1.0 — 安全 & 稳定性 (2026-02-27)
 
