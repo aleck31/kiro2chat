@@ -16,7 +16,7 @@ class TestAntiPrompt:
         )
         history = req["conversationState"]["history"]
         assert len(history) >= 2
-        assert "Claude" in history[0]["userInputMessage"]["content"]
+        assert "TOOL RULES" in history[0]["userInputMessage"]["content"]
 
     def test_user_system_preserved(self):
         req = openai_to_kiro(

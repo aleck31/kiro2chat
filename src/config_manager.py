@@ -11,6 +11,7 @@ _SECTIONS = {
     "default_model": "model",
     "model_map": "model",
     "enabled_mcp_servers": "mcp",
+    "assistant_identity": "general",
 }
 
 
