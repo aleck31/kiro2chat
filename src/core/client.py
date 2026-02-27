@@ -46,7 +46,8 @@ class KiroClient:
             f"📤 Kiro request: model={_cur.get('modelId')}, "
             f"tools={len(_tools)}{_tool_names}, "
             f"history={len(_cs.get('history', []))}, "
-            f"content={_cur.get('content', '')[:80]!r}"
+            f"content={_cur.get('content', '')[:80]!r}, "
+            f"images={len(_cur.get('images', []))}"
         )
 
         async with self._http.stream(

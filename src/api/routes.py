@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1")
 
 # Shared instances (initialized in app lifespan)
-token_manager: TokenManager | None = None
-kiro_client: KiroClient | None = None
+token_manager: TokenManager = None  # type: ignore[assignment]
+kiro_client: KiroClient = None  # type: ignore[assignment]
 
 
 def init_services(tm: TokenManager, kiro: KiroClient):
@@ -79,8 +79,8 @@ async def chat_completions(
     user_tag.set(client_tag)
 
     body = await request.json()
-    logger.info(f"📥 chat_completions request: model={body.get('model')}, messages={len(body.get('messages', []))}, tools={len(body.get('tools', []) or [])}, stream={body.get('stream')}")
     messages = body.get("messages", [])
+    logger.info(f"📥 chat_completions request: model={body.get('model')}, messages={len(messages)}, tools={len(body.get('tools', []) or [])}, stream={body.get('stream')}")
     model = body.get("model", config.default_model)
     stream = body.get("stream", False)
     tools = body.get("tools")

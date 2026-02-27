@@ -129,9 +129,9 @@ def run_api():
 
 def run_webui():
     """Run the Gradio Web UI."""
-    from .webui import create_ui
+    from .webui import create_ui, LAUNCH_KWARGS
     demo = create_ui()
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    demo.launch(**LAUNCH_KWARGS)
 
 
 def run_bot():
