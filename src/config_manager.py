@@ -1,7 +1,5 @@
 """Config file management for kiro2chat."""
 
-import os
-import sys
 from pathlib import Path
 
 CONFIG_DIR = Path.home() / ".config" / "kiro2chat"

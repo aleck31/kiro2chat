@@ -12,12 +12,15 @@ os.environ.setdefault("STRANDS_NON_INTERACTIVE", "true")
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from . import __version__
 from .config import config
 from .core import TokenManager
 from .core.client import KiroClient
+from .core.health import check_health
 from .api.routes import router, init_services
+from .api.anthropic_routes import router as anthropic_router, init_anthropic_routes
 from .api.agent_routes import router as agent_router, init_agent_routes
 
 # Configure logging
@@ -59,9 +62,12 @@ async def lifespan(app: FastAPI):
     tm = TokenManager()
     kiro = KiroClient()
     init_services(tm, kiro)
+    init_anthropic_routes(tm, kiro)
+    global _health_tm, _health_cw
+    _health_tm, _health_cw = tm, kiro
 
     try:
-        token = await tm.get_access_token()
+        await tm.get_access_token()
         logger.info(f"✅ Token valid, profile: {tm.profile_arn}")
     except Exception as e:
         logger.error(f"❌ Token validation failed: {e}")
@@ -99,7 +105,19 @@ app = FastAPI(
 )
 
 app.include_router(router)
+app.include_router(anthropic_router)
 app.include_router(agent_router)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Store references for health check
+_health_tm: TokenManager | None = None
+_health_cw: KiroClient | None = None
 
 
 @app.get("/")
@@ -111,10 +129,27 @@ async def root():
         "endpoints": {
             "models": "/v1/models",
             "chat": "/v1/chat/completions",
+            "messages": "/v1/messages",
             "agent_chat": "/v1/agent/chat",
             "agent_tools": "/v1/agent/tools",
+            "health": "/health",
+            "metrics": "/metrics",
         },
     }
+
+
+@app.get("/health")
+async def health():
+    if _health_tm and _health_cw:
+        return await check_health(_health_tm, _health_cw)
+    return {"status": "starting", "checks": {}}
+
+
+@app.get("/metrics")
+async def metrics():
+    from .metrics import get_metrics, get_content_type
+    from fastapi.responses import Response
+    return Response(content=get_metrics(), media_type=get_content_type())
 
 
 def run_api():

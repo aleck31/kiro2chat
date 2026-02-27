@@ -15,6 +15,7 @@ dependencies = [
     "strands-agents-tools>=0.2.20",
     "tomli-w>=1.0.0",
     "uvicorn>=0.40.0",
+    "prometheus-client>=0.24.1",
 ]
 
 [project.scripts]
@@ -32,3 +33,9 @@ path = "src/__init__.py"
 
 [tool.uv]
 package = true
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "ruff>=0.15.4",
+]

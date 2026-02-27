@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from ..config import config
 from ..core import TokenManager
 from ..core.client import KiroClient
+from ..core.sanitizer import sanitize_text
 from ..stats import stats
 
 logger = logging.getLogger(__name__)
@@ -200,6 +201,8 @@ async def _stream_response(
             if event.event_type == "assistantResponseEvent":
                 content = event.payload.get("content", "")
                 if content:
+                    content = sanitize_text(content, is_chunk=True)
+                if content:
                     yield _make_chunk(chat_id, created, model, {"content": content})
 
             elif event.event_type == "toolUseEvent":
@@ -276,7 +279,7 @@ async def _non_stream_response(
             error_msg = event.payload.get("message", str(event.payload))
             raise HTTPException(status_code=502, detail=f"Kiro error: {error_msg}")
 
-    full_text = "".join(text_parts)
+    full_text = sanitize_text("".join(text_parts))
     finish_reason = "tool_calls" if tool_calls else "stop"
 
     message: dict = {
