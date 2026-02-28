@@ -1,5 +1,29 @@
 # Changelog
 
+### v0.9.5
+- **CLI tmux 管理** — `kiro2chat <action> [service]` 支持后台 start/stop/restart/status/attach，per-component tmux session（`kiro2chat-api/webui/bot`），退役 `kiro2chat.sh`
+- **assistant_identity 配置** — `config.toml` + Web UI 下拉（kiro/claude），控制 anti-prompt 注入和响应清洗强度
+- **context_limit 配置** — `config.toml` + Web UI 数字输入，请求前预检 token 数（默认 190000）
+- **并行工具调用 400 修复** — `converter.py` 正确收集所有尾部 toolResult 消息，避免 history/current 分裂导致 400
+- **per-session Agent 隔离** — `agent_routes.py` 按 `x-user-tag`/`session_id` 维护独立会话，TTL 12h 自动清理
+- **滑动窗口** — Agent 使用 `SlidingWindowConversationManager(window_size=20)`
+- **Favicon** — Web UI 使用 `docs/favicon.png`
+- 新增 2 个测试（共 30 个）
+
+### v0.9.4
+- **assistant_identity** — `config.toml` + Web UI 下拉（kiro/claude），控制 anti-prompt 注入和响应清洗强度（v0.9.5 合并前的独立版本）
+
+### v0.9.3
+- **MCP enable/disable** — `config.toml` 控制启用/禁用 MCP server，Web UI Settings 页可切换并热重载
+- **HTTP/SSE MCP 支持** — `agent.py` 支持 `http`/`sse` transport 类型
+- **Monitor 页增强** — 实时日志流、MCP server 状态展示
+- **Settings 页重构** — MCP 配置与模型配置分离为独立 tab
+
+### v0.9.1
+- `data_dir` 配置项（默认 `~/.local/share/kiro2chat`），统一日志、数据文件路径
+- `kiro2chat@.service` systemd 模板更新
+- Agent system prompt 精简
+
 ### v0.9.0
 - **Anthropic Messages API** — `/v1/messages` 完整兼容（流式 + 非流式），支持 tool_use/tool_result、image blocks、thinking blocks、auto-continuation
 - `/v1/messages/count_tokens` token 估算端点

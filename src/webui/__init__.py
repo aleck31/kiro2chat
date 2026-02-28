@@ -25,6 +25,7 @@ def create_ui() -> gr.Blocks:
 LAUNCH_KWARGS = {
     "server_name": "0.0.0.0",
     "server_port": 7860,
+    "favicon_path": "docs/favicon.png",
     "footer_links": [],
     "allowed_paths": ["/tmp", str(_config.data_dir / "output")],
 }

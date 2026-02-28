@@ -15,6 +15,24 @@ Wrap Kiro CLI's Claude backend into an OpenAI + Anthropic compatible API Gateway
 - 📊 **Token Estimation** — CJK-aware token counting (tiktoken + fallback)
 - 📈 **Prometheus Metrics** — Request counts, latency, tokens, errors, retries
 
+## Screenshots
+
+**Telegram Bot** — Agent-powered bot with tool calling and Markdown rendering
+
+<img src="docs/screenshots/kiro-tgbot-1.png" width="380"> <img src="docs/screenshots/kiro-tgbot-2.png" width="380">
+
+**Kiro2Chat WebUI** — Gradio multi-page UI with model selector and tool call display
+
+<img src="docs/screenshots/kiro-webchat.png" width="780">
+
+**MCP Config** — Enable/disable MCP servers and reload agent without restart
+
+<img src="docs/screenshots/setting-mcp.png" width="780">
+
+**Model Config** — Configure assistant identity, context limit, and model mapping
+
+<img src="docs/screenshots/setting-model.png" width="780">
+
 ## Architecture
 
 ![Architecture](docs/architecture.png)
@@ -27,13 +45,14 @@ cd ~/repos/kiro2chat
 uv sync
 cp .env.example .env   # edit with your config
 
-./kiro2chat.sh start   # start all services in background
-./kiro2chat.sh stop    # stop
+kiro2chat start        # start all services in background
+kiro2chat status       # check status
+kiro2chat stop         # stop
 ```
 
-> Run `./kiro2chat.sh attach` to view live output (detach with `Ctrl+B D`).
+> Run `kiro2chat attach` to view live output (detach with `Ctrl+B D`).
 
-Or run directly:
+Or run directly in foreground:
 
 ```bash
 uv run kiro2chat all       # all services

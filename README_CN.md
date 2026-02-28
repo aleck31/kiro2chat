@@ -17,6 +17,24 @@
 - 📊 **Token 估算** — CJK 感知的 token 计数（tiktoken + 降级方案）
 - 📈 **Prometheus 监控** — 请求计数、延迟、token 统计、错误、重试
 
+## 截图
+
+**Telegram Bot** — Agent 驱动的机器人，支持工具调用和 Markdown 渲染
+
+<img src="docs/screenshots/kiro-tgbot-1.png" width="380"> <img src="docs/screenshots/kiro-tgbot-2.png" width="380">
+
+**Kiro2Chat WebUI** — Gradio 多页面界面，支持模型选择和工具调用展示
+
+<img src="docs/screenshots/kiro-webchat.png" width="780">
+
+**MCP Config** — 启用/禁用 MCP Server，无需重启即可 Reload Agent
+
+<img src="docs/screenshots/setting-mcp.png" width="780">
+
+**模型配置** — 配置 Assistant Identity、Context Limit 和模型映射
+
+<img src="docs/screenshots/setting-model.png" width="780">
+
 ## 架构
 
 ![Architecture](docs/architecture.png)
@@ -29,12 +47,12 @@ cd ~/repos/kiro2chat
 uv sync
 cp .env.example .env   # 编辑配置
 
-./kiro2chat.sh start   # 后台启动所有服务
-./kiro2chat.sh status  # 查看状态
-./kiro2chat.sh stop    # 停止
+kiro2chat start        # 后台启动所有服务
+kiro2chat status       # 查看状态
+kiro2chat stop         # 停止
 ```
 
-> 运行 `./kiro2chat.sh attach` 查看实时输出（`Ctrl+B D` 退出）。
+> 运行 `kiro2chat attach` 查看实时输出（`Ctrl+B D` 退出）。
 
 或直接运行：
 
