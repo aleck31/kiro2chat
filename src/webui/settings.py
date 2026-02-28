@@ -93,7 +93,7 @@ def build_settings_page():
         )
 
         gr.Markdown("Kiro2chat MCP 配置 (`~/.config/kiro2chat/mcp.json`)")
-        gr.Code(label="JSON", value='TBD', language="json")
+        gr.Code(label="JSON", value='{}', language="json")
 
         def save_and_reload(selected):
             import httpx
@@ -127,7 +127,6 @@ def build_settings_page():
             label="Context Limit (tokens)",
             value=defaults[1],
             precision=0,
-            info="发送给 LLM 的最大 token 数，超出时主动报错（Claude 上限 200k）",
         )
         cfg_default_model = gr.Textbox(label="默认模型", value=defaults[2])
         gr.Markdown("Model MAP")

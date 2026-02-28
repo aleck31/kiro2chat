@@ -212,26 +212,147 @@ def run_all():
 
 
 USAGE = """\
-Usage: kiro2chat [command]
+Usage: kiro2chat <action> [service]
 
-Commands:
-  api     Start the API server (default)
-  webui   Start the Gradio Web UI
-  bot     Start the Telegram bot
-  all     Start API + Web UI + Bot together
+Actions (background management via tmux):
+  start   [service]  Start service(s) in background
+  stop    [service]  Stop service(s)
+  restart [service]  Restart service(s)
+  status  [service]  Show running status
+  attach  [service]  Attach to tmux session (Ctrl+B D to detach)
+
+Services (optional, default: all):
+  api     API server (port 8000)
+  webui   Gradio Web UI (port 7860)
+  bot     Telegram Bot
+
+Direct run (foreground):
+  kiro2chat api|webui|bot|all
 
 Options:
   -h, --help  Show this help
 """
 
+_SERVICE_PORTS = {
+    "all":   "api:8000 webui:7860",
+    "api":   "8000",
+    "webui": "7860",
+    "bot":   None,
+}
+
+_TMUX_SESSIONS = {
+    "all":   ("kiro2chat",        "uv run kiro2chat all"),
+    "api":   ("kiro2chat-api",    "uv run kiro2chat api"),
+    "webui": ("kiro2chat-webui",  "uv run kiro2chat webui"),
+    "bot":   ("kiro2chat-bot",    "uv run kiro2chat bot"),
+}
+
+
+def _tmux_running(session: str) -> bool:
+    import subprocess
+    r = subprocess.run(["tmux", "has-session", "-t", session], capture_output=True)
+    return r.returncode == 0
+
+
+def _tmux_start(session: str, cmd: str):
+    import subprocess
+    from pathlib import Path
+    cwd = str(Path(__file__).parent.parent)
+    subprocess.run(["tmux", "new-session", "-d", "-s", session, "-c", cwd, cmd], check=True)
+    print(f"Started (tmux session: {session})")
+
+
+def _tmux_stop(session: str):
+    import subprocess
+    subprocess.run(["tmux", "kill-session", "-t", session], check=True)
+    print(f"Stopped (tmux session: {session})")
+
+
+def _handle_bg(service: str, action: str):
+    session, cmd = _TMUX_SESSIONS[service]
+    if action == "start":
+        if _tmux_running(session):
+            print(f"Already running (tmux session: {session})")
+            sys.exit(1)
+        _tmux_start(session, cmd)
+    elif action == "stop":
+        if not _tmux_running(session):
+            print("Not running")
+            sys.exit(1)
+        _tmux_stop(session)
+    elif action == "restart":
+        if _tmux_running(session):
+            _tmux_stop(session)
+            import time
+            time.sleep(1)
+        _tmux_start(session, cmd)
+    elif action == "status":
+        if not _tmux_running(session):
+            print(f"{session}: stopped")
+        else:
+            import subprocess
+            pid = subprocess.run(
+                ["tmux", "list-panes", "-t", session, "-F", "#{pane_pid}"],
+                capture_output=True, text=True
+            ).stdout.strip()
+            etime = ""
+            if pid:
+                r = subprocess.run(
+                    ["ps", "-o", "etime=", "-p", pid],
+                    capture_output=True, text=True
+                )
+                etime = r.stdout.strip()
+            ports = _SERVICE_PORTS.get(service)
+            lines = [f"{session}: running"]
+            if etime:
+                lines.append(f"  uptime: {etime}")
+            if pid:
+                lines.append(f"  pid:    {pid}")
+            if ports:
+                lines.append(f"  ports:  {ports}")
+            print("\n".join(lines))
+    elif action == "attach":
+        import os
+        os.execvp("tmux", ["tmux", "attach", "-t", session])
+    else:
+        print(f"Unknown action: {action}")
+        sys.exit(1)
+
+
+def _handle_daemon(action: str):
+    print("daemon install/uninstall is not supported. Please refer to docs/DEPLOYMENT.md for systemd setup.")
+    sys.exit(1)
+
 
 def main():
     args = sys.argv[1:]
-    cmd = args[0] if args else "api"
-
-    if cmd in ("-h", "--help", "help"):
+    if not args or args[0] in ("-h", "--help", "help"):
         print(USAGE)
-    elif cmd == "api":
+        return
+
+    # daemon install/uninstall
+    if args[0] == "daemon":
+        action = args[1] if len(args) > 1 else ""
+        _handle_daemon(action)
+        return
+
+    _BG_ACTIONS = {"start", "stop", "restart", "status", "attach"}
+    _SERVICES = {"api", "webui", "bot", "all"}
+
+    # kiro2chat <action> [service]
+    if args[0] in _BG_ACTIONS:
+        service = args[1] if len(args) > 1 and args[1] in _SERVICES else "all"
+        _handle_bg(service, args[0])
+        return
+
+    # kiro2chat <service> <action>  (legacy, keep for compatibility)
+    if args[0] in _SERVICES and len(args) > 1 and args[1] in _BG_ACTIONS:
+        _handle_bg(args[0], args[1])
+        return
+
+    # foreground run (legacy)
+    cmd = args[0]
+    if cmd == "api":
         run_api()
     elif cmd == "webui":
         run_webui()
