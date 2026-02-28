@@ -14,12 +14,13 @@ def _load_config_values():
     c = config
     return (
         cfg.get("assistant_identity", c.assistant_identity),
+        cfg.get("context_limit", c.context_limit),
         cfg.get("default_model", c.default_model),
         json.dumps(cfg.get("model_map", dict(c.model_map)), indent=2, ensure_ascii=False),
     )
 
 
-def _save_config(assistant_identity, default_model, model_map_json):
+def _save_config(assistant_identity, context_limit, default_model, model_map_json):
     try:
         model_map = json.loads(model_map_json) if model_map_json.strip() else {}
     except json.JSONDecodeError as e:
@@ -28,6 +29,7 @@ def _save_config(assistant_identity, default_model, model_map_json):
     # Merge with existing config to preserve other sections (e.g. [mcp])
     data = load_config_file()
     data["assistant_identity"] = assistant_identity
+    data["context_limit"] = int(context_limit)
     data["default_model"] = default_model
     data["model_map"] = model_map
     try:
@@ -35,6 +37,7 @@ def _save_config(assistant_identity, default_model, model_map_json):
         gr.Info("配置已保存！重启服务后生效。")
         return (
             assistant_identity,
+            context_limit,
             default_model,
             json.dumps(model_map, indent=2, ensure_ascii=False),
             gr.Button(value="✅ 已保存", interactive=False),
@@ -120,9 +123,15 @@ def build_settings_page():
             label="Assistant Identity",
             info="kiro: 保留 Kiro 身份；claude: 覆盖为 Claude 身份并启用身份替换",
         )
-        cfg_default_model = gr.Textbox(label="默认模型", value=defaults[1])
+        cfg_context_limit = gr.Number(
+            label="Context Limit (tokens)",
+            value=defaults[1],
+            precision=0,
+            info="发送给 LLM 的最大 token 数，超出时主动报错（Claude 上限 200k）",
+        )
+        cfg_default_model = gr.Textbox(label="默认模型", value=defaults[2])
         gr.Markdown("Model MAP")
-        cfg_model_map = gr.Code(label="JSON", value=defaults[2], language="json")
+        cfg_model_map = gr.Code(label="JSON", value=defaults[3], language="json")
 
         save_btn = gr.Button("💾 保存配置", variant="primary")
 
@@ -130,11 +139,12 @@ def build_settings_page():
             return gr.Button(value="💾 保存配置", interactive=True)
 
         cfg_identity.input(fn=_enable_save, outputs=[save_btn])
+        cfg_context_limit.input(fn=_enable_save, outputs=[save_btn])
         cfg_default_model.input(fn=_enable_save, outputs=[save_btn])
         cfg_model_map.input(fn=_enable_save, outputs=[save_btn])
 
         save_btn.click(
             fn=_save_config,
-            inputs=[cfg_identity, cfg_default_model, cfg_model_map],
-            outputs=[cfg_identity, cfg_default_model, cfg_model_map, save_btn],
+            inputs=[cfg_identity, cfg_context_limit, cfg_default_model, cfg_model_map],
+            outputs=[cfg_identity, cfg_context_limit, cfg_default_model, cfg_model_map, save_btn],
         )

@@ -88,6 +88,9 @@ class Config:
     default_model: str = _get("default_model", "DEFAULT_MODEL") or "claude-sonnet-4-6 (Krio)"
 
     # Assistant identity presented to users: "kiro" (default) or "claude"
-    assistant_identity: str = _get("assistant_identity") or "kiro"
+    assistant_identity: str = _file_cfg.get("assistant_identity") or "kiro"
+
+    # Context size limit (tokens) — requests exceeding this are rejected before sending
+    context_limit: int = int(_file_cfg.get("context_limit") or 190_000)
 
 config = Config()

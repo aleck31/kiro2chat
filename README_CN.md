@@ -169,6 +169,8 @@ kiro2chat/src/
 |--------|------|
 | `default_model` | 默认模型名称 |
 | `model_map` | 模型名称映射 |
+| `assistant_identity` | `kiro`（默认）或 `claude` — 控制身份覆盖和响应清洗 |
+| `context_limit` | 最大输入 token 数，超出时拒绝请求（默认：`190000`）|
 
 ### 其他
 

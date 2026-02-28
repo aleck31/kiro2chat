@@ -9,8 +9,11 @@ import httpx
 from ..config import config
 from .converter import openai_to_kiro
 from .eventstream import EventStreamMessage, parse_streaming_eventstream
+from .token_counter import count_messages_tokens
 
 logger = logging.getLogger(__name__)
+
+
 
 # Long timeout for extended outputs; retry on transient failures
 _TIMEOUT = httpx.Timeout(connect=30.0, read=7200.0, write=30.0, pool=30.0)
@@ -42,6 +45,14 @@ class KiroClient:
 
         Retries on 5xx errors and timeouts with exponential backoff.
         """
+        # Pre-flight context size check
+        estimated_tokens = count_messages_tokens(messages)
+        if estimated_tokens > config.context_limit:
+            raise RuntimeError(
+                f"Context too large: ~{estimated_tokens:,} tokens exceeds limit of {config.context_limit:,}. "
+                "Please start a new conversation or reduce message history."
+            )
+
         kiro_req = openai_to_kiro(
             messages=messages,
             model=model,
@@ -83,6 +94,16 @@ class KiroClient:
 
                     body = await response.aread()
                     error_text = body.decode("utf-8", errors="replace")[:500]
+
+                    if response.status_code == 400:
+                        _hist = kiro_req.get("conversationState", {}).get("history", [])
+                        _cur_ctx = kiro_req.get("conversationState", {}).get("currentMessage", {}).get("userInputMessage", {}).get("userInputMessageContext", {})
+                        _shape = [
+                            f"user(toolResults={len(h['userInputMessage'].get('userInputMessageContext',{}).get('toolResults',[]))})" if "userInputMessage" in h
+                            else f"assistant(toolUses={len(h['assistantResponseMessage'].get('toolUses') or [])})"
+                            for h in _hist
+                        ]
+                        logger.debug(f"400 history: {' → '.join(_shape)} → current(toolResults={len(_cur_ctx.get('toolResults',[]))})")
 
                     # 5xx: retry with backoff
                     if response.status_code >= 500 and attempt < _MAX_RETRIES - 1:

@@ -166,6 +166,8 @@ Editable via Web UI or directly at `~/.config/kiro2chat/config.toml`:
 |-----|-------------|
 | `default_model` | Default model name |
 | `model_map` | Model name mapping |
+| `assistant_identity` | `kiro` (default) or `claude` — controls identity override and response sanitization |
+| `context_limit` | Max input tokens before rejecting request (default: `190000`) |
 
 ### Other
 
