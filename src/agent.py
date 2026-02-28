@@ -169,10 +169,12 @@ def create_agent(
     output_dir.mkdir(parents=True, exist_ok=True)
     resolved_prompt = system_prompt.format(output_dir=output_dir)
 
+    from strands.agent.conversation_manager.sliding_window_conversation_manager import SlidingWindowConversationManager
     agent = Agent(
         model=model,
         system_prompt=resolved_prompt,
         tools=tools if tools else None,
+        conversation_manager=SlidingWindowConversationManager(window_size=20),
         callback_handler=None,  # Use stream_async() for streaming
     )
 

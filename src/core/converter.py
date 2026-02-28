@@ -142,8 +142,38 @@ def openai_to_kiro(
             trailing_tool_msgs.insert(0, conv_messages[idx])
             idx -= 1
 
-        # Rebuild history without these trailing tool messages
-        # We need to redo history processing... Instead, build tool results for current message
+        # History should exclude ALL trailing tool messages, not just the last one
+        history_messages = conv_messages[:idx + 1]
+
+        # Rebuild history with corrected slice
+        history = []
+        history.append({
+            "userInputMessage": {
+                "content": final_system,
+                "modelId": kiro_model,
+                "origin": "AI_EDITOR",
+            }
+        })
+        history.append({
+            "assistantResponseMessage": {
+                "content": confirmation,
+                "toolUses": None,
+            }
+        })
+        user_buffer2: list[dict] = []
+        for msg in history_messages:
+            role = msg.get("role", "")
+            if role in ("user", "tool"):
+                user_buffer2.append(msg)
+            elif role == "assistant":
+                if user_buffer2:
+                    history.append(_build_history_user_message(user_buffer2, kiro_model))
+                    user_buffer2 = []
+                history.append(_build_history_assistant_message(msg))
+        if user_buffer2:
+            history.append(_build_history_user_message(user_buffer2, kiro_model))
+            history.append({"assistantResponseMessage": {"content": "OK", "toolUses": None}})
+
         tool_results = _extract_tool_results_from_messages(trailing_tool_msgs)
 
         current_content = ""
@@ -152,7 +182,7 @@ def openai_to_kiro(
             "tools": kiro_tools,
         }
     else:
-        current_content = _extract_text(last_msg.get("content", "Hello"))
+        current_content = _extract_text(last_msg.get("content", "")) or ""
         current_user_msg_context = {
             "toolResults": [],
             "tools": kiro_tools,

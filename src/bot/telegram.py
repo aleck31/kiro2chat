@@ -17,7 +17,6 @@ logger = logging.getLogger(__name__)
 
 API_BASE = "http://localhost:8000"
 EDIT_INTERVAL = 15  # edit message every N chunks to avoid rate limits
-MAX_HISTORY = 20  # max messages per session in history
 
 router = Router()
 
@@ -26,10 +25,10 @@ SessionKey = tuple[int, int]
 
 # Per-session state
 session_models: dict[SessionKey, str] = {}
-session_histories: dict[SessionKey, list[dict]] = defaultdict(list)
 
 # Per-session locks to prevent message ordering issues
 session_locks: dict[SessionKey, asyncio.Lock] = defaultdict(asyncio.Lock)
+
 
 def _session_key(message: Message) -> SessionKey:
     """Get session key: (chat_id, user_id) for group isolation."""
@@ -189,13 +188,6 @@ def _format_tool_uses(tool_uses: list[dict]) -> str:
     return "\n".join(parts)
 
 
-def _add_to_history(key: SessionKey, role: str, content: str):
-    """Add a message to session's conversation history."""
-    session_histories[key].append({"role": role, "content": content})
-    if len(session_histories[key]) > MAX_HISTORY:
-        session_histories[key] = session_histories[key][-MAX_HISTORY:]
-
-
 @router.message(Command("start"))
 async def cmd_start(message: Message):
     await message.answer(
@@ -249,8 +241,11 @@ async def cmd_tools(message: Message):
 
 @router.message(Command("clear"))
 async def cmd_clear(message: Message):
-    key = _session_key(message)
-    session_histories[key] = []
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post(f"{API_BASE}/v1/agent/chat", json={"message": ".", "clear_history": True, "stream": False})
+    except Exception:
+        pass
     await message.answer("🗑 对话历史已清空")
 
 
@@ -319,7 +314,6 @@ async def _handle_user_message(message: Message, *, has_photo: bool = False, has
         reply = await message.answer("⏳ Thinking...")
 
         text = message.caption or message.text or ""
-        _add_to_history(key, "user", text)
 
         # Build request body
         body: dict = {"message": text, "stream": True, "model": session_models.get(key)}
@@ -416,8 +410,6 @@ async def _handle_user_message(message: Message, *, has_photo: bool = False, has
 
             display = "\n".join(display_parts) if display_parts else "(empty response)"
 
-            _add_to_history(key, "assistant", full_text)
-
             try:
                 await reply.edit_text(
                     _md_to_html(display)[:4096],
@@ -440,8 +432,6 @@ async def _handle_user_message(message: Message, *, has_photo: bool = False, has
 
         except Exception as e:
             logger.error(f"Chat error: {e}")
-            if session_histories[key] and session_histories[key][-1]["role"] == "user":
-                session_histories[key].pop()
             try:
                 await reply.edit_text(f"❌ Error: {e}")
             except Exception:

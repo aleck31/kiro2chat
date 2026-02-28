@@ -18,6 +18,11 @@ _mcp_clients: list = []
 _mcp_config: dict = {}
 _loaded_mcp_tools: list[dict] = []  # Actual loaded tools per server
 
+# Per-session agents: session_id → Agent
+_session_agents: dict[str, Any] = {}
+_SESSION_TTL = 43200  # 12 hours
+_session_last_used: dict[str, float] = {}
+
 
 def _snapshot_loaded_tools(servers: dict, mcp_clients: list) -> list[dict]:
     """Build a snapshot of actually loaded MCP tools from running clients."""
@@ -56,7 +61,34 @@ def init_agent_routes(agent: Any, mcp_clients: list, mcp_config: dict) -> None:
     _loaded_mcp_tools = _snapshot_loaded_tools(mcp_config, mcp_clients)
 
 
-async def _stream_agent_sse(prompt) -> AsyncIterator[str]:
+def _get_session_agent(session_id: str) -> Any:
+    """Get or create a per-session Agent sharing model and tools with the global agent."""
+    import time as _time
+    now = _time.time()
+
+    # Evict expired sessions
+    expired = [sid for sid, t in _session_last_used.items() if now - t > _SESSION_TTL]
+    for sid in expired:
+        _session_agents.pop(sid, None)
+        _session_last_used.pop(sid, None)
+
+    if session_id not in _session_agents:
+        from strands import Agent
+        from strands.agent.conversation_manager.sliding_window_conversation_manager import SlidingWindowConversationManager
+        _session_agents[session_id] = Agent(
+            model=_agent.model,
+            system_prompt=_agent.system_prompt,
+            tools=list(_agent.tool_registry.registry.values()),
+            conversation_manager=SlidingWindowConversationManager(window_size=20),
+            callback_handler=None,
+        )
+        logger.debug(f"Created new agent session: {session_id}")
+
+    _session_last_used[session_id] = now
+    return _session_agents[session_id]
+
+
+async def _stream_agent_sse(agent: Any, prompt) -> AsyncIterator[str]:
     """Stream agent response as SSE events.
 
     Event types:
@@ -71,7 +103,7 @@ async def _stream_agent_sse(prompt) -> AsyncIterator[str]:
     t0 = time.time()
 
     try:
-        async for event in _agent.stream_async(prompt):
+        async for event in agent.stream_async(prompt):
             if not isinstance(event, dict):
                 continue
 
@@ -158,9 +190,16 @@ async def agent_chat(request: Request):
     stream = body.get("stream", False)
     model_id = body.get("model")
     images = body.get("images", [])  # list of {"data": base64, "format": "png"|"jpeg"}
+    clear_history = body.get("clear_history", False)
+    session_id = body.get("session_id") or client_tag  # fallback to user tag
 
     if not message and not images:
         raise HTTPException(status_code=400, detail="message or images required")
+
+    agent = _get_session_agent(session_id)
+
+    if clear_history:
+        agent.messages = []
 
     # Build prompt: string or ContentBlock list for multimodal
     if images:
@@ -180,11 +219,11 @@ async def agent_chat(request: Request):
 
     if model_id:
         from ..agent import create_model
-        _agent.model = create_model(model_id=model_id)
+        agent.model = create_model(model_id=model_id)
 
     if stream:
         return StreamingResponse(
-            _stream_agent_sse(prompt),
+            _stream_agent_sse(agent, prompt),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -195,7 +234,7 @@ async def agent_chat(request: Request):
 
     # Non-streaming: use async to avoid blocking the event loop
     try:
-        result = await _agent.invoke_async(prompt)
+        result = await agent.invoke_async(prompt)
 
         content = ""
         tool_uses = []
@@ -272,6 +311,15 @@ async def reload_tools():
     # Register new MCP tools
     for tool in new_mcp_tools:
         _agent.tool_registry.register_tool(tool)
+
+    # Update all session agents with new tools
+    for session_agent in _session_agents.values():
+        s_registry = session_agent.tool_registry.registry
+        for name in list(s_registry.keys()):
+            if name not in builtin_names:
+                del s_registry[name]
+        for tool in new_mcp_tools:
+            session_agent.tool_registry.register_tool(tool)
 
     _loaded_mcp_tools = _snapshot_loaded_tools(_mcp_config, _mcp_clients)
 
