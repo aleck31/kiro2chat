@@ -1,5 +1,16 @@
 # Changelog
 
+### v0.10.0 — ACP 架构重构
+- **架构重构** — 从 API 网关转型为 ACP chat bridge，通过 `kiro-cli acp` 子进程通信
+- **ACP Client** — `src/acp/client.py`，JSON-RPC 2.0 over stdio，支持流式输出、工具调用、权限审批、图片输入、模式/模型切换
+- **Bridge** — `src/acp/bridge.py`，会话管理（per-chat 隔离）、按需启动 kiro-cli、空闲超时自动关闭
+- **Adapter 抽象** — `src/adapters/base.py` 定义平台 adapter 接口
+- **Telegram Adapter** — 重写为通过 Bridge 调用，新增 `/agent` 命令、权限审批 inline keyboard、`/cancel` 对接 `session/cancel`
+- **群聊共享 session** — 同群用户共享 session 和 workspace，私聊独立
+- **移除 API 网关代码** — 删除 FastAPI、Strands Agent、OpenAI/Anthropic 兼容路由、WebUI、Prometheus 等（已迁移至 open-kiro 项目）
+- **依赖精简** — 从 12 个依赖精简至 3 个（python-dotenv, aiogram, tomli-w）
+- 13 个测试（ACP Client 8 + Bridge 5）
+
 ### v0.9.5
 - **CLI tmux 管理** — `kiro2chat <action> [service]` 支持后台 start/stop/restart/status/attach，per-component tmux session（`kiro2chat-api/webui/bot`），退役 `kiro2chat.sh`
 - **assistant_identity 配置** — `config.toml` + Web UI 下拉（kiro/claude），控制 anti-prompt 注入和响应清洗强度

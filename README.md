@@ -1,5 +1,7 @@
 # Kiro2Chat
 
+![Version](https://img.shields.io/badge/version-0.10.0-blue)
+
 **[English](README.md)** | **[中文](README_CN.md)**
 
 Bridge kiro-cli to chat platforms (Telegram, Lark, etc.) via ACP protocol.

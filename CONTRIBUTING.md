@@ -6,26 +6,47 @@
 git clone https://github.com/aleck31/kiro2chat.git
 cd kiro2chat
 uv sync
-cp .env.example .env  # edit with your config
+cp .env.example .env  # set TG_BOT_TOKEN
 ```
+
+Prerequisites: [kiro-cli](https://kiro.dev/docs/cli/) installed and logged in.
 
 ## Running
 
 ```bash
-uv run kiro2chat api       # API server
-uv run kiro2chat webui     # Web UI
-uv run kiro2chat bot       # Telegram Bot
-uv run kiro2chat all       # All together
+uv run kiro2chat bot       # Telegram Bot (foreground)
+kiro2chat start            # background via tmux
 ```
 
 ## Testing & Linting
 
 ```bash
-uv run pytest tests/ -v    # 28 tests
+uv run pytest tests/ -v    # tests
 uv run ruff check src/     # linter
 ```
 
 Both are enforced by CI on push/PR.
+
+## Project Structure
+
+```
+src/
+├── app.py              # Entry point, CLI, tmux management
+├── config.py           # Configuration
+├── acp/
+│   ├── client.py       # ACP JSON-RPC client (kiro-cli subprocess)
+│   └── bridge.py       # Session management, event routing
+└── adapters/
+    ├── base.py         # Adapter interface
+    └── telegram.py     # Telegram adapter (aiogram)
+```
+
+## Adding a New Platform Adapter
+
+1. Create `src/adapters/your_platform.py`
+2. Implement `BaseAdapter` interface (see `base.py`)
+3. Wire it up in `app.py` with a new `run_xxx()` function
+4. Add config entries in `config.py`
 
 ## Code Conventions
 
@@ -43,8 +64,8 @@ Both are enforced by CI on push/PR.
 
 ## Reporting Issues
 
-Please include: 
+Please include:
 - Python version
-- kiro-cli version
-- Error logs (redact any API keys or tokens)
+- kiro-cli version (`kiro-cli --version`)
+- Error logs (redact any tokens)
 - Steps to reproduce

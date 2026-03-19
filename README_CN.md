@@ -1,5 +1,7 @@
 # Kiro2Chat
 
+![Version](https://img.shields.io/badge/version-0.10.0-blue)
+
 **[English](README.md)** | **[中文](README_CN.md)**
 
 通过 ACP 协议将 kiro-cli 桥接到各类聊天平台（Telegram、飞书等）。

@@ -35,8 +35,10 @@ _permission_futures: dict[int, asyncio.Future] = {}
 
 
 def _chat_id(message: Message) -> str:
-    uid = message.from_user.id if message.from_user else 0
-    return f"{message.chat.id}:{uid}"
+    cid = abs(message.chat.id)
+    if message.chat.type in ("group", "supergroup"):
+        return f"group.{cid}"
+    return f"private.{cid}"
 
 
 # ── Markdown / HTML rendering (reused from original bot) ──
@@ -315,7 +317,7 @@ async def _handle_message(message: Message, *, has_photo=False, has_document_ima
         # Streaming state
         chunk_count = 0
         tool_lines: list[str] = []
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def on_stream(chunk: str, accumulated: str):
             nonlocal chunk_count
@@ -381,12 +383,14 @@ class TelegramAdapter(BaseAdapter):
         self._token = token
         self._bot: Bot | None = None
         self._dp: Dispatcher | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     async def start(self):
         global _bridge, _bot
         _bridge = self._bridge
         self._bot = Bot(token=self._token)
         _bot = self._bot
+        self._loop = asyncio.get_event_loop()
         self._dp = Dispatcher()
         self._dp.include_router(router)
 
@@ -410,21 +414,23 @@ class TelegramAdapter(BaseAdapter):
 
     def _handle_permission(self, request: PermissionRequest) -> str | None:
         """Sync handler called from Bridge thread — bridges to async TG."""
-        if not _bot:
+        if not _bot or not self._loop:
             return "allow_once"
 
-        loop = asyncio.get_event_loop()
-        fut = loop.create_future()
+        import concurrent.futures
+        f = concurrent.futures.Future()
 
         async def _ask():
-            # Extract chat_id from session mapping
+            nonlocal f
+            async_fut = self._loop.create_future()
+
             chat_id_str = None
             for cid, info in self._bridge._sessions.items():
                 if info.session_id == request.session_id:
                     chat_id_str = cid
                     break
             if not chat_id_str:
-                fut.set_result("allow_once")
+                f.set_result("allow_once")
                 return
 
             tg_chat_id = int(chat_id_str.split(":")[0])
@@ -437,21 +443,23 @@ class TelegramAdapter(BaseAdapter):
                     InlineKeyboardButton(text="❌ Deny", callback_data=f"perm:{0}:deny"),
                 ]]),
             )
-            # Fix callback data with actual message id
-            _permission_futures[msg.message_id] = fut
+            _permission_futures[msg.message_id] = async_fut
             await msg.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
                 InlineKeyboardButton(text="✅ Allow", callback_data=f"perm:{msg.message_id}:allow_once"),
                 InlineKeyboardButton(text="🔒 Trust", callback_data=f"perm:{msg.message_id}:allow_always"),
                 InlineKeyboardButton(text="❌ Deny", callback_data=f"perm:{msg.message_id}:deny"),
             ]]))
 
-        asyncio.run_coroutine_threadsafe(_ask(), loop).result(timeout=5)
+            try:
+                result = await asyncio.wait_for(async_fut, timeout=60)
+                f.set_result(result)
+            except asyncio.TimeoutError:
+                f.set_result("deny")
+
+        asyncio.run_coroutine_threadsafe(_ask(), self._loop)
 
         try:
-            return asyncio.run_coroutine_threadsafe(
-                asyncio.wait_for(fut, timeout=60),
-                loop,
-            ).result(timeout=65)
+            return f.result(timeout=65)
         except Exception:
             return "deny"
 
